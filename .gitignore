@@ -1,0 +1,28 @@
+# ─── Angular ─────────────────────────────────────────────────
+/dist
+/node_modules
+/.angular
+/coverage
+/.tools
+/.tmp-*
+/apm-attributes-*.png
+/tools/compartir/
+
+# ─── Registros ───────────────────────────────────────────────
+*.log
+npm-debug.log*
+
+# ─── Variables de entorno ────────────────────────────────────
+.env
+.env.*
+
+# ─── IDE y editores ──────────────────────────────────────────
+/.vscode
+/.idea
+# Ajustes locales de Claude Code (los skills del proyecto sí se versionan)
+/.claude/*
+!/.claude/skills/
+
+# ─── Sistema operativo ───────────────────────────────────────
+.DS_Store
+Thumbs.db
