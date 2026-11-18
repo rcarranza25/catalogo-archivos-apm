@@ -20,23 +20,45 @@ import { RecordStatusTagComponent } from "../../../shared/ui/record-status-tag/r
 import { SideNavComponent } from "../../../shared/ui/side-nav/side-nav.component";
 import { SidePanelComponent } from "../../../shared/ui/side-panel/side-panel.component";
 import { SnackbarComponent } from "../../../shared/ui/snackbar/snackbar.component";
+import { TagComponent } from "../../../shared/ui/tag/tag.component";
 import { TabsComponent, TabItem } from "../../../shared/ui/tabs/tabs.component";
 import { TextFieldComponent } from "../../../shared/ui/text-field/text-field.component";
+import { TooltipDirective } from "../../../shared/ui/tooltip/tooltip.directive";
 import { UploadSideNavComponent } from "../../../shared/ui/upload-side-nav/upload-side-nav.component";
+import { ApmMultiSelectComponent } from "./components/apm-multi-select/apm-multi-select.component";
 
 type Estado = "Activo" | "Inactivo";
 type Regla = {
   id: number;
-  origen: string;
-  nivel: string;
   operador: string;
-  valor: string;
+  codigo?: number;
+  archivoPadre?: string;
+  nivelAgregacion?: string;
+  atributosComunes?: string[];
+  montosARevisar?: string[];
+  /** Campos de la maqueta previa: se mantienen para no perder registros existentes. */
+  origen?: string;
+  nivel?: string;
+  valor?: string;
 };
 type Atributo = {
   id: number; codigo: number; orden: string; columnas: string[]; nombre: string;
   destino: string; tipoDato: string; clasificador: string; nivelMinimo: string;
   nivelMaximo: string; obligatorio: boolean; multianual: boolean;
   autogenerado: boolean; derivadoPor: string;
+};
+type Firmante = {
+  id: number;
+  codigo: number;
+  firmante: string;
+  orden: string;
+  documentoFirmado: boolean;
+};
+type ReferenciaCruzada = {
+  id: number;
+  codigo: number;
+  catalogoRelacional: string;
+  atributosComunes: string[];
 };
 type Archivo = {
   id: number;
@@ -50,11 +72,15 @@ type Archivo = {
   hasta: string;
   atributos: (string | Atributo)[];
   reglas: Regla[];
-  referencias: string[];
-  firmantes: string[];
+  /** Los textos históricos se conservan y se normalizan solo para la grilla. */
+  referencias: (string | ReferenciaCruzada)[];
+  /** Los textos históricos se normalizan al leer para conservar los datos existentes. */
+  firmantes: (string | Firmante)[];
   /** Datos de cabecera que se conservan al tomar un archivo como origen. */
   tipoAsignacion?: string;
   prefijo?: string;
+  /** Orden de foliación aplicable únicamente a archivos de tipo Anexo. */
+  orden?: string;
 };
 
 const ANEXO_12: Archivo = {
@@ -125,6 +151,7 @@ const BASE: Archivo[] = [
     firmantes: ["Responsable de presupuesto"],
     tipoAsignacion: "Techo",
     prefijo: "ANX11",
+    orden: "1",
   },
   ANEXO_12,
   {
@@ -168,24 +195,8 @@ const BASE: Archivo[] = [
     tipo: "2 - Anexo",
     plantilla: "Plantilla_Anexo_1.xlsx",
     estado: "Activo",
-    desde: "02/02/2026",
-    hasta: "-",
-    atributos: [],
-    reglas: [],
-    referencias: [],
-    firmantes: ["Responsable de presupuesto"],
-  },
-  {
-    id: 102,
-    anio: "2027",
-    codigo: "2",
-    nombre:
-      "Asignación presupuestaria por unidad ejecutora y específica de gasto",
-    tipo: "2 - Anexo",
-    plantilla: "Plantilla_Anexo_2.xlsx",
-    estado: "Activo",
-    desde: "02/02/2026",
-    hasta: "-",
+    desde: "05/07/2026",
+    hasta: "",
     atributos: [],
     reglas: [],
     referencias: [],
@@ -194,13 +205,13 @@ const BASE: Archivo[] = [
   {
     id: 103,
     anio: "2027",
-    codigo: "3",
-    nombre: "Asignación presupuestaria multianual de gastos",
+    codigo: "2",
+    nombre: "APM Gastos",
     tipo: "1 - APM de Gastos",
     plantilla: "APM de Gastos.xlsx",
     estado: "Activo",
-    desde: "02/02/2026",
-    hasta: "-",
+    desde: "10/08/2026",
+    hasta: "",
     atributos: [],
     reglas: [],
     referencias: [],
@@ -209,13 +220,13 @@ const BASE: Archivo[] = [
   {
     id: 104,
     anio: "2027",
-    codigo: "4",
+    codigo: "3",
     nombre: "Pie de página",
     tipo: "3 - Pie de Página",
     plantilla: "Pie de Página.xlsx",
     estado: "Activo",
-    desde: "02/02/2026",
-    hasta: "-",
+    desde: "21/09/2026",
+    hasta: "",
     atributos: [],
     reglas: [],
     referencias: [],
@@ -228,6 +239,7 @@ const BASE: Archivo[] = [
   standalone: true,
   imports: [
     AlertComponent,
+    ApmMultiSelectComponent,
     BreadcrumbComponent,
     ButtonComponent,
     IconComponent,
@@ -241,8 +253,10 @@ const BASE: Archivo[] = [
     SideNavComponent,
     SidePanelComponent,
     SnackbarComponent,
+    TagComponent,
     TabsComponent,
     TextFieldComponent,
+    TooltipDirective,
     UploadSideNavComponent,
   ],
   styles: `
@@ -288,6 +302,68 @@ const BASE: Archivo[] = [
     .apm-attribute-selection-column {
       width: 48px;
       min-width: 48px;
+    }
+
+    .apm-attributes-table {
+      table-layout: fixed;
+    }
+
+    .apm-attributes-table th,
+    .apm-attributes-table td {
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    /* Las selecciones múltiples mantienen una sola fila: cada valor ocupa una
+       línea y la tercera se recorta con elipsis si hay más contenido. */
+    .apm-attributes-table td.apm-multi-value-cell {
+      white-space: normal;
+      text-overflow: clip;
+    }
+
+    .apm-rules-table {
+      table-layout: fixed;
+    }
+
+    .apm-rules-table th,
+    .apm-rules-table td {
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .apm-rules-table td.apm-rules-multi-value-cell {
+      white-space: normal;
+      text-overflow: clip;
+    }
+
+    .apm-editable-table {
+      table-layout: fixed;
+    }
+
+    .apm-editable-actions {
+      position: sticky;
+      right: 0;
+      z-index: 1;
+    }
+
+    .apm-editable-table thead .apm-editable-actions {
+      z-index: 2;
+      background: var(--sys-color-bg-surfaces-surface-high);
+    }
+
+    .apm-editable-table tbody .apm-editable-actions {
+      background: var(--sys-color-bg-surfaces-surface);
+    }
+
+    .apm-multi-value-lines {
+      display: -webkit-box;
+      overflow: hidden;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 3;
+      overflow-wrap: anywhere;
+      white-space: pre-line;
     }
 
     /* Estados de las tarjetas de elección: un único modo gobierna radio, fill y stroke. */
@@ -372,6 +448,48 @@ const BASE: Archivo[] = [
     :host main:has([role="radiogroup"]) article > header {
       display: none;
     }
+
+    /* Solo en Carga documento plantilla, la tarjeta usa el recurso XLS de
+       Figma y no ofrece reemplazar: el flujo de validación sigue en uploader. */
+    :host ::ng-deep .apm-plantilla-upload siaf-uploader > div > div > siaf-icon:first-child {
+      background: center / contain no-repeat url('/assets/figma/modal-annulment/xls-file.svg');
+    }
+
+    :host ::ng-deep .apm-plantilla-upload siaf-uploader > div > div > siaf-icon:first-child > span {
+      visibility: hidden;
+    }
+
+    :host ::ng-deep .apm-plantilla-upload siaf-uploader button[aria-label="Reintentar"] {
+      display: none;
+    }
+
+    /* Los selects del panel conservan foco DOM tras elegir con mouse. Una vez
+       cerrados, vuelven al borde neutro; focus-visible de teclado no cambia. */
+    :host ::ng-deep .apm-atributo-panel siaf-input button[aria-haspopup="listbox"][aria-expanded="false"]:focus:not(:focus-visible) {
+      border-width: 1px;
+      border-color: var(--sys-color-border-states-enabled);
+    }
+
+    @media (min-width: 1280px) {
+      :host ::ng-deep .apm-registro-panel .siaf-sidepanel-overlay > aside {
+        inset: auto;
+        top: 0;
+        right: 0;
+        width: min(calc(100vw - 65px), 1287px);
+        height: min(688px, 100vh);
+      }
+    }
+
+    .apm-regla-form {
+      width: min(100%, 1212px);
+      margin-inline: auto;
+    }
+
+    @media (min-width: 768px) {
+      .apm-regla-form {
+        grid-template-columns: minmax(0, 540px) minmax(0, 1fr);
+      }
+    }
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: ` <main
@@ -423,20 +541,14 @@ const BASE: Archivo[] = [
             ></siaf-records-search-toolbar>
             <div class="mt-siaf-lg flex min-h-8 items-center gap-siaf-xs" aria-label="Filtros aplicados">
               @if (anioFiltro()) {
-                <span class="inline-flex h-8 items-center gap-siaf-xxs rounded-siaf-md border border-[var(--sys-color-border-states-enabled)] bg-surface px-siaf-xs py-siaf-xxs text-sm leading-normal text-text">
-                  Año
-                  <button type="button" class="inline-flex size-5 items-center justify-center rounded-siaf-sm text-[var(--sys-color-icon-states-enabled)]" aria-label="Quitar filtro Año" (click)="quitarFiltro('anio')">
-                    <siaf-icon name="close" [size]="20" />
-                  </button>
-                </span>
+                <siaf-tag variant="input" [removable]="true" removeLabel="Quitar filtro Año" (removed)="quitarFiltro('anio')">
+                  Año: {{ anioFiltro() }}
+                </siaf-tag>
               }
               @if (estadoFiltro()) {
-                <span class="inline-flex h-8 items-center gap-siaf-xxs rounded-siaf-md border border-[var(--sys-color-border-states-enabled)] bg-surface px-siaf-xs py-siaf-xxs text-sm leading-normal text-text">
-                  Estado
-                  <button type="button" class="inline-flex size-5 items-center justify-center rounded-siaf-sm text-[var(--sys-color-icon-states-enabled)]" aria-label="Quitar filtro Estado" (click)="quitarFiltro('estado')">
-                    <siaf-icon name="close" [size]="20" />
-                  </button>
-                </span>
+                <siaf-tag variant="input" [removable]="true" removeLabel="Quitar filtro Estado" (removed)="quitarFiltro('estado')">
+                  Estado: {{ estadoFiltro() }}
+                </siaf-tag>
               }
               @if (anioFiltro() || estadoFiltro()) {
                 <div class="ml-auto">
@@ -616,7 +728,7 @@ const BASE: Archivo[] = [
               <div class="ml-auto flex gap-siaf-xs">
                 <siaf-button variant="outline" (click)="cancelar()"
                   >Cancelar</siaf-button
-                ><siaf-button variant="accent" (click)="solicitarGrabar()"
+                ><siaf-button variant="accent" [disabled]="!puedeGrabar() || archivoEnConsulta()" (click)="solicitarGrabar()"
                   >Grabar</siaf-button
                 >
               </div>
@@ -624,7 +736,7 @@ const BASE: Archivo[] = [
             @if (alertaFormulario()) {
               <siaf-alert tone="error" [title]="alertaFormulario()" />
             }
-            <section class="grid gap-siaf-md px-siaf-md pb-siaf-md pt-0">
+            <section class="grid gap-siaf-md px-siaf-md pb-siaf-md pt-0" [attr.inert]="archivoEnConsulta() ? '' : null">
               <h3 class="m-0 text-sm font-bold uppercase">Datos del archivo</h3>
               <div class="grid gap-siaf-md md:grid-cols-6">
                 <siaf-input
@@ -632,13 +744,13 @@ const BASE: Archivo[] = [
                   label="Año"
                   [autoSuccess]="false"
                   [value]="borrador().anio"
-                  (valueChange)="actualizar('anio', $any($event))"
+                  [disabled]="true"
                 /><siaf-input
                   class="md:col-span-1"
                   label="Código"
                   [autoSuccess]="false"
                   [value]="borrador().codigo"
-                  (valueChange)="actualizar('codigo', $any($event))"
+                  [disabled]="true"
                 /><siaf-input
                   class="md:col-span-4"
                   label="Nombre"
@@ -656,7 +768,7 @@ const BASE: Archivo[] = [
                   type="select"
                   [required]="true"
                   [autoSuccess]="false"
-                  [options]="opcionesTipoArchivo()"
+                  [options]="opcionesConSeleccionar(opcionesTipoArchivo())"
                   [value]="borrador().tipo"
                   [error]="errorCampo('tipo')"
                   (valueChange)="cambiarTipo($any($event))"
@@ -668,7 +780,7 @@ const BASE: Archivo[] = [
                   [required]="tipoAsignacionHabilitado()"
                   [disabled]="!tipoAsignacionHabilitado()"
                   [autoSuccess]="false"
-                  [options]="opcionesTipoAsignacion"
+                  [options]="opcionesConSeleccionar(opcionesTipoAsignacion)"
                   [value]="tipoAsignacion()"
                   [error]="errorCampo('tipoAsignacion')"
                   (valueChange)="cambiarTipoAsignacion($any($event))"
@@ -684,7 +796,7 @@ const BASE: Archivo[] = [
                 /><siaf-input
                   class="md:col-span-2"
                   label="Prefijo"
-                  [required]="tipoSeleccionado()"
+                  [required]="prefijoEsObligatorio()"
                   [disabled]="!tipoSeleccionado()"
                   [autoSuccess]="false"
                   [value]="prefijo()"
@@ -754,19 +866,11 @@ const BASE: Archivo[] = [
               </div>
             </section>
           </section>
-          <section class="apm-configuration rounded-siaf-md bg-surface p-siaf-md">
+          <section class="apm-configuration rounded-siaf-md bg-surface p-siaf-md" [attr.inert]="archivoEnConsulta() ? '' : null">
             <div class="mb-siaf-md flex items-center gap-siaf-xs">
               <h3 class="m-0 text-sm font-bold uppercase">
                 Configuración de archivo
               </h3>
-              <siaf-button
-                class="ml-auto"
-                variant="text"
-                icon="search"
-                [iconOnly]="true"
-                [disabled]="true"
-                ariaLabel="Buscar configuración"
-              />
             </div>
             <div class="apm-tab-panel apm-attributes-content-body flex w-full min-w-0 flex-col gap-siaf-lg border border-[var(--sys-color-divider-default)] px-siaf-lg py-siaf-md">
               <siaf-tabs
@@ -815,10 +919,10 @@ const BASE: Archivo[] = [
                       </div>
                     </div>
                     <div class="apm-attributes-table-scroll" aria-label="Tabla de atributos del archivo">
-                      <table class="min-w-[1500px] w-full border-collapse text-sm">
-                        <colgroup><col class="apm-attribute-selection-column" /><col span="13" /></colgroup>
-                        <thead class="bg-surface-high text-[10px] font-bold uppercase"><tr><th class="apm-attribute-selection-column p-0"></th><th class="p-siaf-sm">Código</th><th class="p-siaf-sm">Orden</th><th class="p-siaf-sm">Columna del Excel</th><th class="p-siaf-sm">Nombre del campo</th><th class="p-siaf-sm">Destino del dato</th><th class="p-siaf-sm">Clasificador</th><th class="p-siaf-sm">Nivel mínimo</th><th class="p-siaf-sm">Nivel máximo</th><th class="p-siaf-sm">Autogenerado</th><th class="p-siaf-sm">Derivado por</th><th class="p-siaf-sm">Tipo de dato</th><th class="p-siaf-sm">Obligatorio</th><th class="p-siaf-sm">Multianual</th></tr></thead>
-                        <tbody>@for (a of atributosVista(); track a.id) {<tr class="border-b border-[var(--sys-color-divider-default)]" [class.bg-[var(--sys-color-bg-states-light-selected)]]="atributoEstaSeleccionado(a.id)"><td class="apm-attribute-selection-column p-0 text-center align-middle"><input type="checkbox" [checked]="atributoEstaSeleccionado(a.id)" (change)="alternarSeleccionAtributo(a.id, $any($event.target).checked)" aria-label="Seleccionar fila atributo" /></td><td class="p-siaf-sm">{{a.codigo}}</td><td class="p-siaf-sm">{{a.orden}}</td><td class="p-siaf-sm">{{etiquetasColumnas(a.columnas)}}</td><td class="p-siaf-sm">{{a.nombre}}</td><td class="p-siaf-sm">{{a.destino}}</td><td class="p-siaf-sm">{{a.clasificador}}</td><td class="p-siaf-sm">{{a.nivelMinimo}}</td><td class="p-siaf-sm">{{a.nivelMaximo}}</td><td class="p-siaf-sm">{{a.autogenerado ? 'Sí' : 'No'}}</td><td class="p-siaf-sm">{{a.derivadoPor}}</td><td class="p-siaf-sm">{{a.tipoDato}}</td><td class="p-siaf-sm">{{a.obligatorio ? 'Sí' : 'No'}}</td><td class="p-siaf-sm">{{a.multianual ? 'Sí' : 'No'}}</td></tr>}</tbody>
+                      <table class="apm-attributes-table min-w-[2240px] w-full border-collapse text-sm">
+                        <colgroup><col class="apm-attribute-selection-column" /><col class="w-[72px]" /><col class="w-[72px]" /><col class="w-[190px]" /><col class="w-[260px]" /><col class="w-[200px]" /><col class="w-[240px]" /><col class="w-[160px]" /><col class="w-[160px]" /><col class="w-[135px]" /><col class="w-[180px]" /><col class="w-[135px]" /><col class="w-[120px]" /><col class="w-[120px]" /></colgroup>
+                        <thead class="bg-surface-high text-[10px] font-bold uppercase"><tr><th class="apm-attribute-selection-column p-0"></th><th class="p-siaf-sm"><span class="block truncate" siafTooltip>Código</span></th><th class="p-siaf-sm"><span class="block truncate" siafTooltip>Orden</span></th><th class="p-siaf-sm"><span class="block truncate" siafTooltip>Columna del Excel</span></th><th class="p-siaf-sm"><span class="block truncate" siafTooltip>Nombre del campo</span></th><th class="p-siaf-sm"><span class="block truncate" siafTooltip>Destino del dato</span></th><th class="p-siaf-sm"><span class="block truncate" siafTooltip>Clasificador</span></th><th class="p-siaf-sm"><span class="block truncate" siafTooltip>Nivel mínimo</span></th><th class="p-siaf-sm"><span class="block truncate" siafTooltip>Nivel máximo</span></th><th class="p-siaf-sm"><span class="block truncate" siafTooltip>Autogenerado</span></th><th class="p-siaf-sm"><span class="block truncate" siafTooltip>Derivado por</span></th><th class="p-siaf-sm"><span class="block truncate" siafTooltip>Tipo de dato</span></th><th class="p-siaf-sm"><span class="block truncate" siafTooltip>Obligatorio</span></th><th class="p-siaf-sm"><span class="block truncate" siafTooltip>Multianual</span></th></tr></thead>
+                        <tbody>@for (a of atributosVista(); track a.id) {<tr class="border-b border-[var(--sys-color-divider-default)]" [class.bg-[var(--sys-color-bg-states-light-selected)]]="atributoEstaSeleccionado(a.id)"><td class="apm-attribute-selection-column p-0 text-center align-middle"><input type="checkbox" [checked]="atributoEstaSeleccionado(a.id)" (change)="alternarSeleccionAtributo(a.id, $any($event.target).checked)" aria-label="Seleccionar fila atributo" /></td><td class="p-siaf-sm" siafTooltip>{{a.codigo}}</td><td class="p-siaf-sm" siafTooltip>{{a.orden}}</td><td class="apm-multi-value-cell p-siaf-sm"><span class="apm-multi-value-lines" [siafTooltip]="etiquetasColumnasOrdenadas(a.columnas)" tooltipMode="truncated">{{etiquetasColumnasEnLineas(a.columnas)}}</span></td><td class="p-siaf-sm" [siafTooltip]="identificadorTecnico(a.nombre)">{{identificadorTecnico(a.nombre)}}</td><td class="p-siaf-sm" siafTooltip>{{a.destino}}</td><td class="p-siaf-sm" siafTooltip>{{a.clasificador}}</td><td class="p-siaf-sm" siafTooltip>{{a.nivelMinimo}}</td><td class="p-siaf-sm" siafTooltip>{{a.nivelMaximo}}</td><td class="p-siaf-sm" siafTooltip>{{a.autogenerado ? 'Sí' : 'No'}}</td><td class="p-siaf-sm" siafTooltip>{{a.derivadoPor}}</td><td class="p-siaf-sm" siafTooltip>{{a.tipoDato}}</td><td class="p-siaf-sm" siafTooltip>{{a.obligatorio ? 'Sí' : 'No'}}</td><td class="p-siaf-sm" siafTooltip>{{a.multianual ? 'Sí' : 'No'}}</td></tr>}</tbody>
                       </table>
                     </div>
                     <siaf-pagination class="block min-w-0" position="Bottom" [rowPage]="true" [pageSize]="10" [rowsPerPage]="10" [totalItems]="atributosVista().length" [totalPages]="1" />
@@ -840,7 +944,7 @@ const BASE: Archivo[] = [
                     <h3 class="m-0 text-sm font-bold">Reglas sumarizadas</h3>
                     <siaf-button
                       class="ml-auto"
-                      variant="text"
+                      variant="filled"
                       icon="add"
                       [iconOnly]="true"
                       ariaLabel="Agregar regla"
@@ -848,47 +952,47 @@ const BASE: Archivo[] = [
                     />
                   </div>
                   @if (borrador().reglas.length) {
-                    <div class="overflow-x-auto">
-                      <table class="w-full min-w-[700px] border-collapse">
+                    <div class="overflow-x-auto" aria-label="Tabla de reglas sumarizadas">
+                      <table class="apm-rules-table min-w-[1260px] w-full border-collapse text-sm">
                         <thead class="bg-surface-high text-[10px] uppercase">
                           <tr>
-                            <th class="p-siaf-sm">Origen</th>
-                            <th class="p-siaf-sm">Nivel</th>
-                            <th class="p-siaf-sm">Operador</th>
-                            <th class="p-siaf-sm">Valor</th>
-                            <th></th>
+                            <th class="w-12"></th>
+                            <th class="p-siaf-sm"><span class="block truncate" siafTooltip>Código</span></th>
+                            <th class="p-siaf-sm"><span class="block truncate" siafTooltip>Archivo padre</span></th>
+                            <th class="p-siaf-sm"><span class="block truncate" siafTooltip>Nivel de agregación</span></th>
+                            <th class="p-siaf-sm"><span class="block truncate" siafTooltip>Operador</span></th>
+                            <th class="p-siaf-sm"><span class="block truncate" siafTooltip>Atributos comunes</span></th>
+                            <th class="p-siaf-sm"><span class="block truncate" siafTooltip>Montos a revisar</span></th>
                           </tr>
                         </thead>
                         <tbody
                           class="text-[length:var(--sys-typography-size-body-2,14px)] font-normal leading-normal"
                         >
-                          @for (r of borrador().reglas; track r.id) {
+                          @for (r of reglasVista(); track r.id) {
                             <tr
                               class="border-b border-[var(--sys-color-divider-default)]"
+                              [class.bg-[var(--sys-color-bg-states-light-selected)]]="reglaEstaSeleccionada(r.id)"
                             >
-                              <td class="p-siaf-sm">{{ r.origen }}</td>
-                              <td class="p-siaf-sm">{{ r.nivel }}</td>
-                              <td class="p-siaf-sm">{{ r.operador }}</td>
-                              <td class="p-siaf-sm">{{ r.valor }}</td>
-                              <td>
-                                <siaf-button
-                                  variant="text"
-                                  icon="edit"
-                                  [iconOnly]="true"
-                                  ariaLabel="Editar regla"
-                                  (click)="editarRegla(r.id)"
-                                />
-                              </td>
+                              <td class="p-siaf-sm text-center"><input type="checkbox" [checked]="reglaEstaSeleccionada(r.id)" (change)="alternarSeleccionRegla(r.id, $any($event.target).checked)" aria-label="Seleccionar regla" /></td>
+                              <td class="p-siaf-sm" siafTooltip>{{ r.codigo }}</td>
+                              <td class="p-siaf-sm" siafTooltip>{{ etiquetaArchivoPadre(r) }}</td>
+                              <td class="p-siaf-sm" siafTooltip>{{ r.nivelAgregacion }}</td>
+                              <td class="p-siaf-sm" siafTooltip>{{ r.operador }}</td>
+                              <td class="apm-rules-multi-value-cell p-siaf-sm"><span class="apm-multi-value-lines" [siafTooltip]="etiquetasAtributos(r.atributosComunes ?? [])" tooltipMode="truncated">{{ etiquetasAtributosEnLineas(r.atributosComunes ?? []) }}</span></td>
+                              <td class="apm-rules-multi-value-cell p-siaf-sm"><span class="apm-multi-value-lines" [siafTooltip]="etiquetasAtributos(r.montosARevisar ?? [])" tooltipMode="truncated">{{ etiquetasAtributosEnLineas(r.montosARevisar ?? []) }}</span></td>
                             </tr>
                           }
                         </tbody>
                       </table>
                     </div>
+                    @if (cantidadReglasSeleccionadas() === 1) {
+                      <div class="mt-siaf-sm flex justify-end"><siaf-button variant="text" icon="edit" [iconOnly]="true" ariaLabel="Editar regla" (click)="editarReglaSeleccionada()" /></div>
+                    }
                   } @else {
                     <p
                       class="m-0 rounded-siaf-sm bg-[var(--sys-color-bg-surfaces-surface-low)] px-siaf-md py-siaf-sm text-sm text-text-muted"
                     >
-                      No hay reglas sumarizadas configuradas.
+                      Aún no se han registrado reglas sumarizadas. Haz clic en el botón Agregar (+) para registrar la primera.
                     </p>
                   }
                 </div>
@@ -896,25 +1000,99 @@ const BASE: Archivo[] = [
               @if (pestana() === "referencias") {
                 <div class="p-siaf-md">
                   <h3 class="m-0 mb-siaf-md text-sm font-bold">
-                    Referencia cruzada
+                    Referencias cruzadas
                   </h3>
-                  @for (x of borrador().referencias; track x) {
-                    <p class="border-b p-siaf-sm">{{ x }}</p>
-                  } @empty {
+                  @if (referenciasVista().length || referenciaEsNueva()) {
+                    <div class="overflow-x-auto" aria-label="Tabla de referencias cruzadas">
+                      <table class="apm-editable-table min-w-[920px] w-full border-collapse text-sm">
+                        <colgroup><col class="w-[110px]" /><col class="w-[300px]" /><col class="w-[minmax(360px,1fr)]" /><col class="w-[130px]" /></colgroup>
+                        <thead class="bg-surface-high text-[10px] font-bold uppercase"><tr>
+                          <th class="p-siaf-sm text-left">Código</th><th class="p-siaf-sm text-left">Catálogo relacional</th><th class="p-siaf-sm text-left">Atributos comunes</th><th class="apm-editable-actions p-siaf-sm text-center">Accionables</th>
+                        </tr></thead>
+                        <tbody>
+                          @for (referencia of referenciasVista(); track referencia.id) {
+                            @let fila = referenciaFila(referencia);
+                            <tr class="border-b border-[var(--sys-color-divider-default)]">
+                              <td class="p-siaf-sm">{{ fila.codigo }}</td>
+                              <td class="p-siaf-sm"><siaf-input label="Catálogo relacional" type="select" [required]="true" [autoSuccess]="false" [options]="opcionesConSeleccionar(catalogosRelacionales)" [value]="fila.catalogoRelacional" (valueChange)="actualizarReferenciaFila(referencia, 'catalogoRelacional', $any($event))" /></td>
+                              <td class="p-siaf-sm"><siaf-apm-multi-select label="Atributos comunes" [required]="true" [options]="opcionesAtributosComunes()" [value]="fila.atributosComunes" (valueChange)="actualizarReferenciaFila(referencia, 'atributosComunes', $any($event))" /></td>
+                              <td class="apm-editable-actions p-siaf-sm"><div class="flex justify-center gap-siaf-xxs">
+                                @if (referenciaTieneCambios(referencia)) {
+                                  <siaf-button variant="text" icon="close" [iconOnly]="true" ariaLabel="Cancelar cambios de referencia cruzada" (click)="cancelarCambiosReferencia(referencia.id)" />
+                                  <siaf-button variant="text" icon="check" [iconOnly]="true" ariaLabel="Aceptar cambios de referencia cruzada" [disabled]="!referenciaFilaValida(referencia)" (click)="aceptarCambiosReferencia(referencia)" />
+                                }
+                                <siaf-button variant="text" icon="delete" [iconOnly]="true" ariaLabel="Eliminar referencia cruzada" [disabled]="referenciaFilaAbierta()" (click)="solicitarEliminarReferencia(referencia)" />
+                              </div></td>
+                            </tr>
+                          }
+                          @if (referenciaEsNueva()) {
+                            @let fila = referenciaBorrador();
+                            <tr class="border-b border-[var(--sys-color-divider-default)]">
+                              <td class="p-siaf-sm">{{ fila.codigo }}</td>
+                              <td class="p-siaf-sm"><siaf-input label="Catálogo relacional" type="select" [required]="true" [autoSuccess]="false" [options]="opcionesConSeleccionar(catalogosRelacionales)" [value]="fila.catalogoRelacional" (valueChange)="actualizarReferenciaNueva('catalogoRelacional', $any($event))" /></td>
+                              <td class="p-siaf-sm"><siaf-apm-multi-select label="Atributos comunes" [required]="true" [options]="opcionesAtributosComunes()" [value]="fila.atributosComunes" (valueChange)="actualizarReferenciaNueva('atributosComunes', $any($event))" /></td>
+                              <td class="apm-editable-actions p-siaf-sm"><div class="flex justify-center gap-siaf-xxs"><siaf-button variant="text" icon="close" [iconOnly]="true" ariaLabel="Cancelar nueva referencia cruzada" (click)="cancelarReferenciaNueva()" /><siaf-button variant="text" icon="check" [iconOnly]="true" ariaLabel="Aceptar nueva referencia cruzada" [disabled]="!referenciaNuevaValida()" (click)="aceptarReferenciaNueva()" /></div></td>
+                            </tr>
+                          }
+                        </tbody>
+                      </table>
+                    </div>
+                    <siaf-pagination class="mt-siaf-md block min-w-0" position="Bottom" [rowPage]="true" [pageSize]="10" [rowsPerPage]="10" [totalItems]="referenciasVista().length" [totalPages]="1" />
+                  } @else {
                     <p
                       class="m-0 rounded-siaf-sm bg-[var(--sys-color-bg-surfaces-surface-low)] px-siaf-md py-siaf-sm text-sm text-text-muted"
                     >
-                      No hay referencias cruzadas configuradas.
+                      Aún no se han agregado referencias cruzadas. Haga clic en Añadir para registrar la primera.
                     </p>
                   }
+                  <siaf-button class="mt-siaf-md" variant="text" icon="add" [disabled]="referenciaFilaAbierta()" (click)="agregarReferencia()">Añadir</siaf-button>
                 </div>
               }
               @if (pestana() === "firmantes") {
                 <div class="p-siaf-md">
-                  <h3 class="m-0 mb-siaf-md text-sm font-bold">Firmantes</h3>
-                  @for (x of borrador().firmantes; track x) {
-                    <p class="border-b p-siaf-sm">{{ x }}</p>
-                  } @empty {
+                  <div class="mb-siaf-md flex items-center gap-siaf-sm">
+                    <h3 class="m-0 text-sm font-bold">Firmantes</h3>
+                    <siaf-button class="ml-auto" variant="filled" icon="add" [iconOnly]="true" ariaLabel="Añadir firmante" [disabled]="firmanteFilaAbierta()" (click)="agregarFirmante()" />
+                  </div>
+                  @if (firmantesVista().length || firmanteEsNuevo()) {
+                    <div class="overflow-x-auto" aria-label="Tabla de firmantes">
+                      <table class="apm-editable-table min-w-[980px] w-full border-collapse text-sm">
+                        <colgroup><col class="w-[90px]" /><col class="w-[320px]" /><col class="w-[170px]" /><col class="w-[190px]" /><col class="w-[130px]" /></colgroup>
+                        <thead class="bg-surface-high text-[10px] font-bold uppercase"><tr>
+                          <th class="p-siaf-sm text-left">Código</th><th class="p-siaf-sm text-left">Firmante</th><th class="p-siaf-sm text-left">Orden</th><th class="p-siaf-sm text-left">Documento firmado</th><th class="apm-editable-actions p-siaf-sm text-center">Acciones</th>
+                        </tr></thead>
+                        <tbody>
+                          @for (firmante of firmantesVista(); track firmante.id) {
+                            @let fila = firmanteFila(firmante);
+                            <tr class="border-b border-[var(--sys-color-divider-default)]">
+                              <td class="p-siaf-sm">{{ fila.codigo }}</td>
+                              <td class="p-siaf-sm"><siaf-input label="Firmante" type="select" [required]="true" [autoSuccess]="false" [disabled]="firmante.documentoFirmado" [options]="opcionesConSeleccionar(firmantesDisponibles)" [value]="fila.firmante" (valueChange)="actualizarFirmanteFila(firmante, 'firmante', $any($event))" /></td>
+                              <td class="p-siaf-sm"><siaf-input label="Orden" type="number" [autoSuccess]="false" [disabled]="firmante.documentoFirmado" [error]="errorOrdenFirmanteFila(firmante)" [value]="fila.orden" (valueChange)="actualizarFirmanteFila(firmante, 'orden', $any($event))" /></td>
+                              <td class="p-siaf-sm"><label class="inline-flex items-center gap-siaf-xs"><input type="checkbox" [checked]="fila.documentoFirmado" disabled aria-label="Documento firmado" /> {{ fila.documentoFirmado ? 'Sí' : 'No' }}</label></td>
+                              <td class="apm-editable-actions p-siaf-sm"><div class="flex justify-center gap-siaf-xxs">
+                                @if (firmanteTieneCambios(firmante)) {
+                                  <siaf-button variant="text" icon="close" [iconOnly]="true" ariaLabel="Cancelar cambios de firmante" (click)="cancelarCambiosFirmante(firmante.id)" />
+                                  <siaf-button variant="text" icon="check" [iconOnly]="true" ariaLabel="Aceptar cambios de firmante" [disabled]="!firmanteFilaValida(firmante)" (click)="aceptarCambiosFirmante(firmante)" />
+                                }
+                                <siaf-button variant="text" icon="delete" [iconOnly]="true" ariaLabel="Eliminar firmante" [disabled]="firmante.documentoFirmado || firmanteFilaAbierta()" (click)="solicitarEliminarFirmante(firmante)" />
+                              </div></td>
+                            </tr>
+                          }
+                          @if (firmanteEsNuevo()) {
+                            @let fila = firmanteBorrador();
+                            <tr class="border-b border-[var(--sys-color-divider-default)]">
+                              <td class="p-siaf-sm">{{ fila.codigo }}</td>
+                              <td class="p-siaf-sm"><siaf-input label="Firmante" type="select" [required]="true" [autoSuccess]="false" [options]="opcionesConSeleccionar(firmantesDisponibles)" [value]="fila.firmante" (valueChange)="actualizarFirmante('firmante', $any($event))" /></td>
+                              <td class="p-siaf-sm"><siaf-input label="Orden" type="number" [autoSuccess]="false" [error]="errorOrdenFirmante()" [value]="fila.orden" (valueChange)="actualizarFirmante('orden', $any($event))" /></td>
+                              <td class="p-siaf-sm"><label class="inline-flex items-center gap-siaf-xs"><input type="checkbox" [checked]="false" disabled aria-label="Documento firmado" /> No</label></td>
+                              <td class="apm-editable-actions p-siaf-sm"><div class="flex justify-center gap-siaf-xxs"><siaf-button variant="text" icon="close" [iconOnly]="true" ariaLabel="Cancelar nuevo firmante" (click)="cancelarFirmante()" /><siaf-button variant="text" icon="check" [iconOnly]="true" ariaLabel="Aceptar nuevo firmante" [disabled]="!firmanteValido()" (click)="aceptarFirmante()" /></div></td>
+                            </tr>
+                          }
+                        </tbody>
+                      </table>
+                    </div>
+                    <siaf-pagination class="mt-siaf-md block min-w-0" position="Bottom" [rowPage]="true" [pageSize]="10" [rowsPerPage]="10" [totalItems]="firmantesVista().length" [totalPages]="1" />
+                  } @else {
                     <p
                       class="m-0 rounded-siaf-sm bg-[var(--sys-color-bg-surfaces-surface-low)] px-siaf-md py-siaf-sm text-sm text-text-muted"
                     >
@@ -934,7 +1112,7 @@ const BASE: Archivo[] = [
                 [inline]="true"
                 [options]="estados"
                 [value]="borrador().estado"
-                (valueChange)="actualizar('estado', $any($event))"
+                (valueChange)="solicitarCambioEstado($any($event))"
               />
               <div>
                 <siaf-input
@@ -948,11 +1126,7 @@ const BASE: Archivo[] = [
               <siaf-input
                 label="Fecha hasta"
                 [disabled]="true"
-                [value]="
-                  borrador().estado === 'Inactivo'
-                    ? 'Se asignará al grabar'
-                    : borrador().hasta
-                "
+                [value]="borrador().hasta"
               />
             </div>
           </section>
@@ -1097,6 +1271,7 @@ const BASE: Archivo[] = [
       </div>
     </siaf-selection-side-nav>
     <siaf-upload-side-nav
+      class="apm-plantilla-upload"
       title="Carga documento plantilla"
       [open]="cargaPlantillaAbierta()"
       description="Selecciona y carga el archivo de tu elección."
@@ -1120,30 +1295,42 @@ const BASE: Archivo[] = [
       (closed)="cancelarCargaReporte()"
       (confirmed)="confirmarCargaReporte($event)"
     />
-    <siaf-side-panel [open]="panelAtributoAbierto()" [title]="editandoAtributo() ? 'Editar atributo del archivo' : 'Agregar atributo del archivo'" [confirmDisabled]="!atributoValido()" (closed)="cerrarAtributo()" (confirmed)="guardarAtributo()">
+    <siaf-side-panel class="apm-atributo-panel apm-registro-panel" [open]="panelAtributoAbierto()" [title]="editandoAtributo() ? 'Editar atributo del archivo' : 'Agregar atributo del archivo'" [confirmDisabled]="!atributoValido()" (closed)="cerrarAtributo()" (confirmed)="guardarAtributo()">
       <div class="flex flex-col gap-siaf-lg">
         <section><h3 class="mb-siaf-md text-sm font-bold uppercase">Columna</h3><div class="grid min-w-0 grid-cols-1 gap-siaf-md lg:grid-cols-4">
           <siaf-input class="min-w-0" label="Código" [value]="atributoBorrador().codigo.toString()" [disabled]="true" />
           <siaf-input class="min-w-0" label="Orden" type="number" [required]="true" [value]="atributoBorrador().orden" (valueChange)="actualizarAtributo('orden', $any($event))" />
-          <siaf-input class="min-w-0" label="Columna Excel" type="select-multiple" [options]="columnasPlantilla" [value]="atributoBorrador().columnas" (valueChange)="seleccionarColumnas($any($event))" />
-          <siaf-input class="min-w-0" label="Nombre del campo" [required]="true" [value]="atributoBorrador().nombre" (valueChange)="actualizarAtributo('nombre', $any($event))" />
-          <siaf-input class="min-w-0 lg:col-span-2" label="Destino del dato" type="select" [required]="true" [options]="destinosAtributo" [value]="atributoBorrador().destino" (valueChange)="actualizarAtributo('destino', $any($event))" />
-          <siaf-input class="min-w-0 lg:col-span-2" label="Tipo de dato" type="select" [required]="true" [options]="tiposDato" [value]="atributoBorrador().tipoDato" (valueChange)="actualizarAtributo('tipoDato', $any($event))" />
+          <siaf-apm-multi-select class="min-w-0" label="Columna Excel" [options]="columnasPlantilla" [value]="atributoBorrador().columnas" (valueChange)="seleccionarColumnas($any($event))" />
+          <siaf-input class="min-w-0" label="Nombre del campo" [required]="true" [value]="identificadorTecnico(atributoBorrador().nombre)" (valueChange)="actualizarNombreAtributo($any($event))" />
+          <siaf-input class="min-w-0 lg:col-span-2" label="Destino del dato" type="select" [required]="true" [autoSuccess]="false" [options]="opcionesConSeleccionar(destinosAtributo)" [value]="atributoBorrador().destino" (valueChange)="actualizarAtributo('destino', $any($event))" />
+          <siaf-input class="min-w-0 lg:col-span-2" label="Tipo de dato" type="select" [required]="true" [autoSuccess]="false" [options]="opcionesConSeleccionar(tiposDato)" [value]="atributoBorrador().tipoDato" (valueChange)="actualizarAtributo('tipoDato', $any($event))" />
         </div></section>
         <section><h3 class="mb-siaf-md text-sm font-bold uppercase">Datos del clasificador</h3><div class="grid min-w-0 grid-cols-1 gap-siaf-md lg:grid-cols-3">
-          <siaf-input class="min-w-0" label="Clasificador" type="select" [disabled]="atributoBorrador().tipoDato === 'Monto'" [options]="clasificadores" [value]="atributoBorrador().clasificador" (valueChange)="cambiarClasificador($any($event))" />
-          <siaf-input class="min-w-0" label="Nivel mínimo" type="select" [disabled]="atributoBorrador().tipoDato === 'Monto' || !atributoBorrador().clasificador" [options]="nivelesDelClasificador()" [value]="atributoBorrador().nivelMinimo" (valueChange)="actualizarAtributo('nivelMinimo', $any($event))" />
-          <siaf-input class="min-w-0" label="Nivel máximo" type="select" [disabled]="atributoBorrador().tipoDato === 'Monto' || !atributoBorrador().clasificador" [options]="nivelesDelClasificador()" [value]="atributoBorrador().nivelMaximo" (valueChange)="actualizarAtributo('nivelMaximo', $any($event))" />
+          <siaf-input class="min-w-0" label="Clasificador" type="select" [autoSuccess]="false" [disabled]="atributoBorrador().tipoDato === 'Monto'" [options]="opcionesConSeleccionar(clasificadores)" [value]="atributoBorrador().clasificador" (valueChange)="cambiarClasificador($any($event))" />
+          <siaf-input class="min-w-0" label="Nivel mínimo" type="select" [autoSuccess]="false" [disabled]="atributoBorrador().tipoDato === 'Monto' || !atributoBorrador().clasificador" [options]="opcionesConSeleccionar(nivelesDelClasificador())" [value]="atributoBorrador().nivelMinimo" (valueChange)="actualizarAtributo('nivelMinimo', $any($event))" />
+          <siaf-input class="min-w-0" label="Nivel máximo" type="select" [autoSuccess]="false" [disabled]="atributoBorrador().tipoDato === 'Monto' || !atributoBorrador().clasificador" [options]="opcionesConSeleccionar(nivelesDelClasificador())" [value]="atributoBorrador().nivelMaximo" (valueChange)="actualizarAtributo('nivelMaximo', $any($event))" />
         </div></section>
-        <section><h3 class="mb-siaf-md text-sm font-bold uppercase">Características</h3><div class="grid min-w-0 grid-cols-1 items-center gap-siaf-md text-sm lg:grid-cols-4"><label class="inline-flex min-w-0 items-center gap-siaf-xs"><input type="checkbox" [checked]="atributoBorrador().obligatorio" (change)="actualizarAtributo('obligatorio',$any($event.target).checked)" /> Obligatorio</label><label class="inline-flex min-w-0 items-center gap-siaf-xs"><input type="checkbox" [checked]="atributoBorrador().multianual" (change)="actualizarAtributo('multianual',$any($event.target).checked)" /> Multianual</label><label class="inline-flex min-w-0 items-center gap-siaf-xs"><input type="checkbox" [checked]="atributoBorrador().autogenerado" (change)="actualizarAtributo('autogenerado',$any($event.target).checked)" /> Autogenerado</label><siaf-input class="min-w-0" label="Derivado por" type="select" [disabled]="!atributoBorrador().autogenerado" [options]="derivados" [value]="atributoBorrador().derivadoPor" (valueChange)="actualizarAtributo('derivadoPor',$any($event))" /></div></section>
+        <section><h3 class="mb-siaf-md text-sm font-bold uppercase">Características</h3><div class="grid min-w-0 grid-cols-1 items-center gap-siaf-md text-sm lg:grid-cols-4"><label class="inline-flex min-w-0 items-center gap-siaf-xs"><input type="checkbox" [checked]="atributoBorrador().obligatorio" (change)="actualizarAtributo('obligatorio',$any($event.target).checked)" /> Obligatorio</label><label class="inline-flex min-w-0 items-center gap-siaf-xs"><input type="checkbox" [checked]="atributoBorrador().multianual" (change)="actualizarAtributo('multianual',$any($event.target).checked)" /> Multianual</label><label class="inline-flex min-w-0 items-center gap-siaf-xs"><input type="checkbox" [checked]="atributoBorrador().autogenerado" (change)="actualizarAtributo('autogenerado',$any($event.target).checked)" /> Autogenerado</label><siaf-input class="min-w-0" label="Derivado por" type="select" [autoSuccess]="false" [disabled]="!atributoBorrador().autogenerado" [options]="opcionesConSeleccionar(derivados)" [value]="atributoBorrador().derivadoPor" (valueChange)="actualizarAtributo('derivadoPor',$any($event))" /></div></section>
+      </div>
+    </siaf-side-panel>
+    <siaf-side-panel class="apm-regla-panel apm-registro-panel" [open]="panelReglaAbierto()" [title]="editandoRegla() ? 'Editar regla sumarizada' : 'Agregar regla sumarizada'" [confirmDisabled]="!reglaValida()" (closed)="cerrarRegla()" (confirmed)="guardarRegla()">
+      <div class="apm-regla-form grid grid-cols-1 gap-x-siaf-lg gap-y-siaf-md md:grid-cols-2">
+        <siaf-input label="Código" [disabled]="true" [autoSuccess]="false" [value]="reglaBorrador().codigo ?? ''" />
+        <siaf-input label="Archivo padre" type="select" [required]="true" [autoSuccess]="false" [options]="opcionesConSeleccionar(opcionesArchivoPadre())" [value]="reglaBorrador().archivoPadre ?? ''" (valueChange)="actualizarRegla('archivoPadre', $any($event))" />
+        <siaf-input label="Nivel de agregación" type="select" [required]="true" [autoSuccess]="false" [options]="opcionesConSeleccionar(nivelesAgregacion)" [value]="reglaBorrador().nivelAgregacion ?? ''" (valueChange)="actualizarRegla('nivelAgregacion', $any($event))" />
+        <siaf-input label="Operador" type="select" [required]="true" [autoSuccess]="false" [options]="opcionesConSeleccionar(operadoresRegla)" [value]="reglaBorrador().operador" (valueChange)="actualizarRegla('operador', $any($event))" />
+        <siaf-apm-multi-select label="Atributos comunes" [required]="true" [options]="opcionesAtributosComunes()" [value]="reglaBorrador().atributosComunes ?? []" (valueChange)="actualizarRegla('atributosComunes', $any($event))" />
+        <siaf-apm-multi-select label="Montos a revisar" [required]="true" [options]="opcionesMontosARevisar()" [value]="reglaBorrador().montosARevisar ?? []" (valueChange)="actualizarRegla('montosARevisar', $any($event))" />
       </div>
     </siaf-side-panel>
     <siaf-modal [open]="confirmarEliminarAtributo()" title="¿Eliminar atributo?" description="El atributo seleccionado se retirará del formulario." (confirmed)="eliminarAtributo()" (closed)="confirmarEliminarAtributo.set(false)" />
+    <siaf-modal [open]="confirmarEliminarReferencia() !== null" variant="delete-record" title="¿Eliminar referencia cruzada?" description="La referencia cruzada seleccionada se retirará de la configuración." (confirmed)="eliminarReferencia()" (closed)="confirmarEliminarReferencia.set(null)" />
+    <siaf-modal [open]="confirmarEliminarFirmante() !== null" variant="delete-record" title="¿Eliminar firmante?" description="El firmante seleccionado se retirará de la configuración." (confirmed)="eliminarFirmante()" (closed)="confirmarEliminarFirmante.set(null)" />
     <siaf-modal
       [open]="confirmarPlantilla()"
       variant="custom"
       title="¿Reemplazar documento plantilla?"
-      description="Al grabar se eliminarán Atributos, Reglas sumarizadas y Referencia cruzada. Se conservarán los Firmantes."
+      description="Al grabar se eliminarán Atributos, Reglas sumarizadas y Referencias cruzadas. Se conservarán los Firmantes."
       illustrationSrc="assets/figma/modals/validate.svg"
       [showIllustration]="true"
       (confirmed)="confirmarCambioPlantilla()"
@@ -1161,15 +1348,54 @@ const BASE: Archivo[] = [
       (canceled)="confirmarGuardar.set(false)"
       (closed)="confirmarGuardar.set(false)"
     />
-    <siaf-snackbar
-      [open]="snack()"
-      tone="success"
-      [message]="mensajeSnack()"
-      (closed)="snack.set(false)"
+    <siaf-modal
+      [open]="confirmarInactivacion()"
+      variant="custom"
+      title="¿Está seguro(a) de inactivar el archivo?"
+      description="El archivo dejará de estar disponible, pero su información no será eliminada."
+      (confirmed)="confirmarInactivacionArchivo()"
+      (canceled)="cancelarInactivacion()"
+      (closed)="cancelarInactivacion()"
     />
+    <div class="fixed bottom-siaf-lg left-1/2 z-50 w-[min(430px,calc(100vw-32px))] -translate-x-1/2">
+      <siaf-snackbar
+        [open]="snack()"
+        tone="success"
+        [message]="mensajeSnack()"
+        (closed)="snack.set(false)"
+      />
+    </div>
   </main>`,
 })
 export class CatalogoArchivosApmComponent {
+  private static readonly IDENTIFICADORES_TECNICOS: Readonly<Record<string, string>> = {
+    Pliego: 'PLIEGO',
+    'Unidad ejecutora': 'UNIDAD_EJECUTORA',
+    'Fuente de financiamiento': 'FUENTE',
+    Fuente: 'FUENTE',
+    'Categoría de gasto': 'CATEGORIA_GASTO',
+    'Objeto del gasto': 'OBJETO_GASTO',
+    Genérica: 'GENERICA',
+    Subgenérica: 'SUBGENERICA',
+    'Subgenérica det': 'SUBGENERICA_DET',
+    'Específica de gasto': 'ESPECIFICA',
+    Específica: 'ESPECIFICA',
+  };
+  private static readonly IDENTIFICADORES_TECNICOS_VALIDOS: ReadonlySet<string> = new Set([
+    'PLIEGO',
+    'UNIDAD_EJECUTORA',
+    'FUENTE',
+    'CATEGORIA_GASTO',
+    'OBJETO_GASTO',
+    'GENERICA',
+    'SUBGENERICA',
+    'SUBGENERICA_DET',
+    'ESPECIFICA',
+    'ASIGNACION',
+    'ANO_1',
+    'ANO_2',
+    'ANO_3',
+  ]);
   private readonly router = inject(Router);
   readonly breadcrumbs = [
     { label: "Inicio", href: "/panel" },
@@ -1180,7 +1406,7 @@ export class CatalogoArchivosApmComponent {
   readonly tabs: TabItem[] = [
     { id: "atributos", label: "ATRIBUTOS" },
     { id: "reglas", label: "REGLAS SUMARIZADAS" },
-    { id: "referencias", label: "REFERENCIA CRUZADA" },
+    { id: "referencias", label: "REFERENCIAS CRUZADAS" },
     { id: "firmantes", label: "FIRMANTES" },
   ];
   readonly estados = [
@@ -1188,7 +1414,6 @@ export class CatalogoArchivosApmComponent {
     { label: "Inactivo", value: "Inactivo" },
   ];
   readonly opcionesTipoArchivo = computed(() => [
-    { value: "", label: "Seleccione" },
     {
       value: "1 - APM de Gastos",
       label: "1 - APM de Gastos",
@@ -1200,7 +1425,6 @@ export class CatalogoArchivosApmComponent {
     { value: "3 - Pie de Página", label: "3 - Pie de Página" },
   ]);
   readonly opcionesTipoAsignacion = [
-    { value: "", label: "Seleccione" },
     { value: "Techo", label: "Techo" },
     { value: "Piso", label: "Piso" },
   ];
@@ -1235,15 +1459,47 @@ export class CatalogoArchivosApmComponent {
   });
   readonly confirmarEliminarAtributo = signal(false);
   readonly atributoBorrador = signal<Atributo>({id:0,codigo:1,orden:'',columnas:[],nombre:'',destino:'',tipoDato:'',clasificador:'',nivelMinimo:'',nivelMaximo:'',obligatorio:false,multianual:false,autogenerado:false,derivadoPor:''});
-  readonly columnasPlantilla = [
-    ['PLIEGO', 'Pliego'],
-    ['UNIDAD_EJECUTORA', 'Unidad Ejecutora'],
-    ['FUENTE', 'Fuente'],
-    ['CATEGORIA_GASTO', 'Categoría de gasto'],
-    ['ANO_1', 'Año 1'],
-    ['ANO_2', 'Año 2'],
-    ['ANO_3', 'Año 3'],
+  readonly panelReglaAbierto = signal(false);
+  readonly editandoRegla = signal(false);
+  readonly reglaBorrador = signal<Regla>({ id: 0, codigo: 1, archivoPadre: '', nivelAgregacion: '', operador: '', atributosComunes: [], montosARevisar: [] });
+  readonly reglasSeleccionadas = signal<ReadonlySet<number>>(new Set());
+  readonly cantidadReglasSeleccionadas = computed(() => this.reglasSeleccionadas().size);
+  readonly firmantesDisponibles = [
+    'Loli Jhover Chavez',
+    'Cinthya Bravo',
+    'Sergio Espinoza',
+    'Patricia CIME',
+    'Peggy Alcón',
+    'Cristina Mendoza',
+  ].map((value) => ({ value, label: value }));
+  readonly firmanteEsNuevo = signal(false);
+  readonly firmanteEditandoId = signal<number | null>(null);
+  readonly firmanteBorrador = signal<Firmante>({ id: 0, codigo: 1, firmante: '', orden: '', documentoFirmado: false });
+  readonly borradoresFirmantes = signal<Readonly<Record<number, Firmante>>>({});
+  readonly confirmarEliminarFirmante = signal<number | null>(null);
+  readonly referenciaEsNueva = signal(false);
+  readonly referenciaBorrador = signal<ReferenciaCruzada>({ id: 0, codigo: 1, catalogoRelacional: '', atributosComunes: [] });
+  readonly borradoresReferencias = signal<Readonly<Record<number, ReferenciaCruzada>>>({});
+  readonly confirmarEliminarReferencia = signal<number | null>(null);
+  readonly catalogosRelacionales = [
+    { value: '15 - CR Objeto del Gasto por Fuente', label: '15 - CR Objeto del Gasto por Fuente' },
+  ];
+  readonly nivelesAgregacion = ['Pliego', 'Unidad Ejecutora'].map((value) => ({ value, label: value }));
+  readonly operadoresRegla = [
+    ['3 - Igual (=)', '3 - Igual (=)'],
+    ['4 - Mayor o igual (>=)', '4 - Mayor o igual (>=)'],
+    ['5 - Menor o igual (<=)', '5 - Menor o igual (<=)'],
   ].map(([value, label]) => ({ value, label }));
+  readonly columnasPlantilla = [
+    'PLIEGO',
+    'UNIDAD_EJECUTORA',
+    'FUENTE',
+    'CATEGORIA_GASTO',
+    'OBJETO_GASTO',
+    'ANO_1',
+    'ANO_2',
+    'ANO_3',
+  ].map((value) => ({ value, label: this.identificadorTecnico(value) }));
   readonly destinosAtributo = ['1 - Cabecera','2 - Detalle JSON'].map(value=>({value,label:value}));
   readonly tiposDato = ['Texto','Numérico','Monto','Fecha'].map(value=>({value,label:value}));
   readonly clasificadores = ['1 - Institucional','4 - Objeto del gasto','5 - Fuente de financiamiento','6 - Categoría del gasto'].map(value=>({value,label:value}));
@@ -1265,6 +1521,8 @@ export class CatalogoArchivosApmComponent {
     ].map(value => ({ value, label: value })),
   };
   readonly atributosVista = computed(() => this.borrador().atributos.map((a, i) => this.normalizarAtributo(a, i)));
+  readonly referenciasVista = computed(() => this.borrador().referencias.map((referencia, indice) => this.normalizarReferencia(referencia, indice)));
+  readonly firmantesVista = computed(() => this.borrador().firmantes.map((firmante, indice) => this.normalizarFirmante(firmante, indice)));
   readonly archivoPlantilla = signal<File | null>(null);
   readonly tamanoPlantilla = computed(() => {
     const archivo = this.archivoPlantilla();
@@ -1283,6 +1541,7 @@ export class CatalogoArchivosApmComponent {
   readonly plantillaPendiente = signal("");
   readonly reemplazoConfirmado = signal(false);
   readonly confirmarGuardar = signal(false);
+  readonly confirmarInactivacion = signal(false);
   readonly snack = signal(false);
   readonly mensajeSnack = signal("");
   readonly archivosFiltrados = computed(() =>
@@ -1325,13 +1584,17 @@ export class CatalogoArchivosApmComponent {
   );
   readonly errorOrden = computed(() =>
     this.ordenOcupado()
-      ? `Este orden ya está en uso para el año ${this.borrador().anio}`
+      ? `AE-03: Ya existe un anexo con el orden ${this.orden()} para el año ${this.borrador().anio}.`
       : "",
   );
   readonly tipoSeleccionado = computed(() => Boolean(this.borrador().tipo));
   readonly esAnexo = computed(() => this.borrador().tipo === "2 - Anexo");
   readonly tipoAsignacionHabilitado = computed(() =>
     ["1 - APM de Gastos", "2 - Anexo"].includes(this.borrador().tipo),
+  );
+  readonly prefijoEsObligatorio = computed(() => this.tipoAsignacionHabilitado());
+  readonly archivoEnConsulta = computed(
+    () => !this.esNuevo() && this.borrador().estado === "Inactivo",
   );
   constructor() {
     if (location.pathname.endsWith("/nuevo")) this.seleccionandoModo.set(true);
@@ -1422,6 +1685,11 @@ export class CatalogoArchivosApmComponent {
     copia.estado = "Activo";
     copia.desde = "";
     copia.hasta = "";
+    // RN-FIR: una copia no hereda documentos ya firmados.
+    copia.firmantes = copia.firmantes.map((firmante, indice) => ({
+      ...this.normalizarFirmante(firmante, indice),
+      documentoFirmado: false,
+    }));
     this.borrador.set(copia);
     this.archivoPlantilla.set(null);
     this.cargaPlantillaAbierta.set(false);
@@ -1434,10 +1702,17 @@ export class CatalogoArchivosApmComponent {
     this.editando.set(true);
   }
   siguienteOrden() {
-    return (
-      this.archivos().filter((a) => a.anio === "2027" && a.tipo === "2 - Anexo")
-        .length + 1
-    );
+    const ordenesActivos = this.archivos()
+      .filter(
+        (archivo) =>
+          archivo.anio === this.borrador().anio &&
+          archivo.tipo === "2 - Anexo" &&
+          archivo.estado === "Activo",
+      )
+      .map((archivo) => Number(archivo.orden))
+      .filter((orden) => Number.isInteger(orden) && orden > 0);
+
+    return Math.max(0, ...ordenesActivos) + 1;
   }
   siguienteCodigo(anio: string) {
     return (
@@ -1449,22 +1724,8 @@ export class CatalogoArchivosApmComponent {
       ) + 1
     );
   }
-  siguienteCodigoDesdeGrilla() {
-    return (
-      Math.max(
-        0,
-        ...this.archivosFiltrados().map(
-          (archivo) => Number(archivo.codigo) || 0,
-        ),
-      ) + 1
-    );
-  }
   ordenOcupado() {
-    return (
-      this.esNuevo() &&
-      this.borrador().tipo === "2 - Anexo" &&
-      Number(this.orden()) < this.siguienteOrden()
-    );
+    return this.ordenDuplicado();
   }
   puedeGrabar() {
     const b = this.borrador();
@@ -1472,11 +1733,12 @@ export class CatalogoArchivosApmComponent {
       b.codigo &&
       b.nombre &&
       b.tipo &&
-      this.prefijo() &&
+      (!this.prefijoEsObligatorio() || this.prefijo()) &&
       b.plantilla &&
       (!this.tipoAsignacionHabilitado() || this.tipoAsignacion()) &&
       (!this.esAnexo() || this.orden()) &&
-      !this.errorOrden() &&
+      !this.firmanteFilaAbierta() &&
+      this.configuracionFirmantesValida() &&
       !this.archivos().some(
         (a) =>
           a.id !== b.id &&
@@ -1504,7 +1766,7 @@ export class CatalogoArchivosApmComponent {
       campos.push("tipoAsignacion");
     }
     if (this.esAnexo() && !this.orden()) campos.push("orden");
-    if (this.tipoSeleccionado() && !this.prefijo()) campos.push("prefijo");
+    if (this.prefijoEsObligatorio() && !this.prefijo()) campos.push("prefijo");
     if (!b.plantilla) campos.push("plantilla");
     return campos;
   }
@@ -1517,14 +1779,35 @@ export class CatalogoArchivosApmComponent {
       );
       return false;
     }
-    if (this.errorOrden()) {
-      this.camposConError.set(["orden"]);
+    const b = this.borrador();
+    if (this.codigoDuplicado(b)) {
       this.alertaFormulario.set(
-        "No se puede grabar el archivo. Corrija el orden para continuar.",
+        `AE-02: Ya existe un archivo con el código ${b.codigo} para el año ${b.anio}.`,
       );
       return false;
     }
-    const b = this.borrador();
+    if (this.ordenDuplicado(b)) {
+      this.camposConError.set(["orden"]);
+      this.alertaFormulario.set(
+        `AE-03: Ya existe un anexo con el orden ${this.orden()} para el año ${b.anio}.`,
+      );
+      return false;
+    }
+    if (this.prefijoDuplicado(b)) {
+      this.camposConError.set(["prefijo"]);
+      this.alertaFormulario.set(
+        `AE-04: Ya existe un archivo con el prefijo ${this.prefijo()} para el año ${b.anio}.`,
+      );
+      return false;
+    }
+    if (this.firmanteFilaAbierta()) {
+      this.alertaFormulario.set("Finalice o cancele la edición del firmante antes de grabar el archivo.");
+      return false;
+    }
+    if (!this.configuracionFirmantesValida()) {
+      this.alertaFormulario.set("Los firmantes deben tener todos un orden secuencial o todos permanecer sin orden. No se permiten órdenes duplicados.");
+      return false;
+    }
     if (this.duplicadoTipoActivo(b)) {
       this.alertaFormulario.set(
         `AE-01: Ya existe un archivo activo de tipo ${b.tipo} para el año ${b.anio}.`,
@@ -1543,13 +1826,13 @@ export class CatalogoArchivosApmComponent {
     this.borrador.set({
       id: Date.now(),
       anio: "2027",
-      codigo: String(this.siguienteCodigoDesdeGrilla()),
+      codigo: String(this.siguienteCodigo("2027")),
       nombre: "",
       tipo: "",
       plantilla: "",
       estado: "Activo",
       desde: "",
-      hasta: "-",
+      hasta: "",
       atributos: [],
       reglas: [],
       referencias: [],
@@ -1567,6 +1850,9 @@ export class CatalogoArchivosApmComponent {
     this.esNuevo.set(false);
     this.reemplazoConfirmado.set(false);
     this.borrador.set(structuredClone(a));
+    this.tipoAsignacion.set(a.tipoAsignacion ?? "");
+    this.prefijo.set(a.prefijo ?? "");
+    this.orden.set(a.orden ?? "");
     this.pestana.set("atributos");
     this.editando.set(true);
   }
@@ -1580,9 +1866,33 @@ export class CatalogoArchivosApmComponent {
     this.borrador.update((a) => ({ ...a, [key]: value }) as Archivo);
     this.limpiarErrorCampo(key);
   }
+  solicitarCambioEstado(estado: Estado): void {
+    if (estado !== "Inactivo") {
+      this.actualizar("estado", estado);
+      return;
+    }
+
+    if (this.borrador().estado === "Inactivo") return;
+    if (this.archivoEsPadreDeReglaActiva(this.borrador())) {
+      this.alertaFormulario.set(
+        "AE-12: No es posible inactivar el archivo porque es Archivo Padre de una regla sumarizada activa.",
+      );
+      return;
+    }
+
+    this.alertaFormulario.set("");
+    this.confirmarInactivacion.set(true);
+  }
+  confirmarInactivacionArchivo(): void {
+    this.confirmarInactivacion.set(false);
+    this.actualizar("estado", "Inactivo");
+  }
+  cancelarInactivacion(): void {
+    this.confirmarInactivacion.set(false);
+  }
   cambiarTipo(tipo: string) {
     this.actualizar("tipo", tipo);
-    this.tipoAsignacion.set("");
+    this.tipoAsignacion.set(tipo === "1 - APM de Gastos" ? "Techo" : "");
     this.prefijo.set("");
     this.orden.set(tipo === "2 - Anexo" ? String(this.siguienteOrden()) : "");
     this.limpiarErrorCampo("tipoAsignacion");
@@ -1645,6 +1955,7 @@ export class CatalogoArchivosApmComponent {
   agregarAtributo() {
     if (!this.borrador().plantilla) return;
     this.editandoAtributo.set(false);
+    this.atributosSeleccionados.set(new Set());
     this.atributoBorrador.set(this.nuevoAtributo());
     this.panelAtributoAbierto.set(true);
   }
@@ -1653,6 +1964,12 @@ export class CatalogoArchivosApmComponent {
   actualizarAtributo(campo: keyof Atributo, valor: string | boolean) { this.atributoBorrador.update(a => ({...a,[campo]:valor} as Atributo)); }
   nivelesDelClasificador() {
     return this.nivelesPorClasificador[this.atributoBorrador().clasificador] ?? [];
+  }
+  opcionesConSeleccionar(opciones: ReadonlyArray<{ value: string; label: string }>) {
+    return [
+      { value: '', label: 'Seleccionar' },
+      ...opciones.filter((opcion) => opcion.value !== ''),
+    ];
   }
   cambiarClasificador(clasificador: string) {
     const niveles = this.nivelesPorClasificador[clasificador] ?? [];
@@ -1668,16 +1985,64 @@ export class CatalogoArchivosApmComponent {
     return columnas.map((columna) => this.columnaLegible(columna)).join(', ');
   }
 
+  /**
+   * Capa única de presentación para identificadores técnicos. Los valores del
+   * modelo nunca se normalizan aquí: se conservan para edición y persistencia.
+   */
+  identificadorTecnico(valor: string): string {
+    const tecnico = CatalogoArchivosApmComponent.IDENTIFICADORES_TECNICOS[valor] ?? valor;
+    const anio = /^ANO_([123])$/.exec(tecnico);
+    if (anio) return `Anio_${anio[1]}`;
+    return CatalogoArchivosApmComponent.IDENTIFICADORES_TECNICOS_VALIDOS.has(tecnico)
+      ? tecnico.toLowerCase()
+      : tecnico;
+  }
+
+  etiquetasAtributos(valores: string[]): string {
+    return valores.map((valor) => this.identificadorTecnico(valor)).join(', ');
+  }
+
+  etiquetasAtributosEnLineas(valores: string[]): string {
+    return valores.map((valor) => this.identificadorTecnico(valor)).join('\n');
+  }
+
+  etiquetasColumnasOrdenadas(columnas: string[]): string {
+    return this.columnasEnOrdenPlantilla(columnas).map((columna) => this.columnaLegible(columna)).join(', ');
+  }
+
+  etiquetasColumnasEnLineas(columnas: string[]): string {
+    return this.columnasEnOrdenPlantilla(columnas).map((columna) => this.columnaLegible(columna)).join('\n');
+  }
+
   seleccionarColumnas(valor: string[]) {
     this.atributoBorrador.update((atributo) => ({
       ...atributo,
       columnas: valor,
-      nombre: atributo.nombre || this.etiquetasColumnas(valor),
+      nombre: atributo.nombre || this.nombreTecnicoDeColumnas(valor),
     }));
+  }
+
+  actualizarNombreAtributo(valor: string): void {
+    const candidato = valor.trim().toUpperCase();
+    this.actualizarAtributo(
+      'nombre',
+      CatalogoArchivosApmComponent.IDENTIFICADORES_TECNICOS_VALIDOS.has(candidato) ? candidato : valor,
+    );
   }
 
   private columnaLegible(valor: string): string {
     return this.columnasPlantilla.find((opcion) => opcion.value === valor)?.label ?? valor.replace(/_/g, ' ');
+  }
+  private nombreTecnicoDeColumnas(columnas: string[]): string {
+    if (columnas.length && columnas.every((columna) => /^ANO_[123]$/.test(columna))) return 'ASIGNACION';
+    return columnas.join(', ');
+  }
+  private columnasEnOrdenPlantilla(columnas: string[]): string[] {
+    const indicePorColumna = new Map(this.columnasPlantilla.map((opcion, indice) => [opcion.value, indice]));
+    return columnas
+      .map((columna, indice) => ({ columna, indice, orden: indicePorColumna.get(columna) ?? Number.MAX_SAFE_INTEGER }))
+      .sort((a, b) => a.orden - b.orden || a.indice - b.indice)
+      .map(({ columna }) => columna);
   }
   atributoEstaSeleccionado(id: number): boolean { return this.atributosSeleccionados().has(id); }
   alternarSeleccionAtributo(id: number, seleccionado: boolean) {
@@ -1697,32 +2062,333 @@ export class CatalogoArchivosApmComponent {
     const orden = (nivel: string) => Number.parseInt(nivel, 10);
     return orden(atributo.nivelMaximo) >= orden(atributo.nivelMinimo);
   }
-  cerrarAtributo() { this.panelAtributoAbierto.set(false); }
-  guardarAtributo() { if(!this.atributoValido()) return; const a=this.atributoBorrador(); const estabaEditando=this.editandoAtributo(); this.borrador.update(x=>({...x,atributos:estabaEditando?x.atributos.map((v,i)=>this.normalizarAtributo(v,i).id===a.id?a:v):[...x.atributos,a]})); this.atributosSeleccionados.set(estabaEditando ? new Set([a.id]) : new Set()); this.panelAtributoAbierto.set(false); }
+  cerrarAtributo() {
+    this.panelAtributoAbierto.set(false);
+    this.editandoAtributo.set(false);
+    this.atributosSeleccionados.set(new Set());
+  }
+  guardarAtributo() {
+    if (!this.atributoValido()) return;
+    const atributo = this.atributoBorrador();
+    const estabaEditando = this.editandoAtributo();
+    this.borrador.update((archivo) => ({
+      ...archivo,
+      atributos: estabaEditando
+        ? archivo.atributos.map((valor, indice) => this.normalizarAtributo(valor, indice).id === atributo.id ? atributo : valor)
+        : [...archivo.atributos, atributo],
+    }));
+    this.cerrarAtributo();
+    if (estabaEditando) this.mostrarSnackbarExito("El registro de atributo se modificó con éxito.");
+  }
   editarAtributo() { const [id] = this.atributosSeleccionados(); const a=this.atributosVista().find(x=>x.id===id); if(!a)return; this.editandoAtributo.set(true); this.atributoBorrador.set(structuredClone(a)); this.panelAtributoAbierto.set(true); }
   eliminarAtributo() { const ids=this.atributosSeleccionados(); this.borrador.update(x=>({...x,atributos:x.atributos.filter((v,i)=>!ids.has(this.normalizarAtributo(v,i).id))})); this.atributosSeleccionados.set(new Set()); this.confirmarEliminarAtributo.set(false); }
   agregarRegla() {
-    this.borrador.update((a) => ({
-      ...a,
-      reglas: [
-        ...a.reglas,
-        {
-          id: Date.now(),
-          origen: "Anexo 1",
-          nivel: "Unidad ejecutora",
-          operador: "Mayor o igual (≥)",
-          valor: "0",
-        },
-      ],
-    }));
+    this.editandoRegla.set(false);
+    this.reglasSeleccionadas.set(new Set());
+    this.reglaBorrador.set({ id: Date.now(), codigo: this.siguienteCodigoRegla(), archivoPadre: '', nivelAgregacion: '', operador: '', atributosComunes: [], montosARevisar: [] });
+    this.panelReglaAbierto.set(true);
   }
-  editarRegla(id: number) {
-    this.borrador.update((a) => ({
-      ...a,
-      reglas: a.reglas.map((r) =>
-        r.id === id ? { ...r, valor: r.valor === "0" ? "1" : "0" } : r,
-      ),
+  reglaEstaSeleccionada(id: number): boolean { return this.reglasSeleccionadas().has(id); }
+  alternarSeleccionRegla(id: number, seleccionada: boolean): void {
+    this.reglasSeleccionadas.set(seleccionada ? new Set([id]) : new Set());
+  }
+  editarReglaSeleccionada(): void {
+    const [id] = this.reglasSeleccionadas();
+    const regla = this.reglasVista().find((item) => item.id === id);
+    if (!regla) return;
+    this.editandoRegla.set(true);
+    this.reglaBorrador.set(structuredClone(regla));
+    this.panelReglaAbierto.set(true);
+  }
+  actualizarRegla(campo: keyof Omit<Regla, 'id'>, valor: string | string[]): void {
+    this.reglaBorrador.update((regla) => ({ ...regla, [campo]: valor }));
+  }
+  reglaValida(): boolean {
+    const regla = this.reglaBorrador();
+    return Boolean(regla.archivoPadre && regla.nivelAgregacion && regla.operador && regla.atributosComunes?.length && regla.montosARevisar?.length);
+  }
+  cerrarRegla(): void {
+    this.panelReglaAbierto.set(false);
+    this.editandoRegla.set(false);
+    this.reglasSeleccionadas.set(new Set());
+  }
+  guardarRegla(): void {
+    if (!this.reglaValida()) return;
+    const regla = this.reglaBorrador();
+    const estabaEditando = this.editandoRegla();
+    this.borrador.update((archivo) => ({
+      ...archivo,
+      reglas: estabaEditando
+        ? archivo.reglas.map((item) => item.id === regla.id ? regla : item)
+        : [...archivo.reglas, regla],
     }));
+    this.cerrarRegla();
+    if (estabaEditando) this.mostrarSnackbarExito("El registro de regla sumarizada se modificó con éxito.");
+  }
+  readonly reglasVista = computed(() => this.borrador().reglas.map((regla, indice) => this.normalizarRegla(regla, indice)));
+  opcionesArchivoPadre() {
+    return this.archivos()
+      .filter((archivo) => archivo.anio === this.borrador().anio && archivo.id !== this.borrador().id)
+      .map((archivo) => ({ value: String(archivo.id), label: `${archivo.codigo} - ${archivo.nombre}` }));
+  }
+  opcionesAtributosComunes() {
+    return this.atributosVista().map((atributo) => ({ value: atributo.nombre, label: this.identificadorTecnico(atributo.nombre) }));
+  }
+  opcionesMontosARevisar() {
+    return this.atributosVista()
+      .filter((atributo) => atributo.tipoDato === 'Monto')
+      .filter((atributo, indice, atributos) => atributos.findIndex((candidato) => candidato.nombre === atributo.nombre) === indice)
+      .map((atributo) => ({ value: atributo.nombre, label: this.identificadorTecnico(atributo.nombre) }));
+  }
+  etiquetaArchivoPadre(regla: Regla): string {
+    if (regla.archivoPadre) return this.opcionesArchivoPadre().find((opcion) => opcion.value === regla.archivoPadre)?.label ?? regla.archivoPadre;
+    return regla.origen ?? '';
+  }
+  valoresEnLineas(valores: string[]): string { return valores.join('\n'); }
+  referenciaFilaAbierta(): boolean {
+    return this.referenciaEsNueva() || Object.keys(this.borradoresReferencias()).length > 0;
+  }
+  agregarReferencia(): void {
+    if (this.referenciaFilaAbierta()) return;
+    this.referenciaBorrador.set({ id: Date.now(), codigo: this.siguienteCodigoReferencia(), catalogoRelacional: '', atributosComunes: [] });
+    this.referenciaEsNueva.set(true);
+  }
+  referenciaFila(referencia: ReferenciaCruzada): ReferenciaCruzada {
+    return this.borradoresReferencias()[referencia.id] ?? referencia;
+  }
+  referenciaTieneCambios(referencia: ReferenciaCruzada): boolean {
+    const borrador = this.borradoresReferencias()[referencia.id];
+    return !!borrador && !this.referenciasSonIguales(borrador, referencia);
+  }
+  actualizarReferenciaFila(referencia: ReferenciaCruzada, campo: 'catalogoRelacional' | 'atributosComunes', valor: string | string[]): void {
+    const siguiente = { ...this.referenciaFila(referencia), [campo]: valor };
+    this.borradoresReferencias.update((borradores) => {
+      if (this.referenciasSonIguales(siguiente, referencia)) {
+        const { [referencia.id]: _descartado, ...restantes } = borradores;
+        return restantes;
+      }
+      return { ...borradores, [referencia.id]: siguiente };
+    });
+  }
+  actualizarReferenciaNueva(campo: 'catalogoRelacional' | 'atributosComunes', valor: string | string[]): void {
+    this.referenciaBorrador.update((referencia) => ({ ...referencia, [campo]: valor }));
+  }
+  referenciaFilaValida(referencia: ReferenciaCruzada): boolean {
+    const fila = this.referenciaFila(referencia);
+    return Boolean(fila.catalogoRelacional && fila.atributosComunes.length);
+  }
+  referenciaNuevaValida(): boolean {
+    const referencia = this.referenciaBorrador();
+    return Boolean(referencia.catalogoRelacional && referencia.atributosComunes.length);
+  }
+  aceptarCambiosReferencia(referencia: ReferenciaCruzada): void {
+    if (!this.referenciaTieneCambios(referencia) || !this.referenciaFilaValida(referencia)) return;
+    const actualizada = structuredClone(this.referenciaFila(referencia));
+    this.borrador.update((archivo) => ({
+      ...archivo,
+      referencias: archivo.referencias.map((valor, indice) => this.normalizarReferencia(valor, indice).id === referencia.id ? actualizada : valor),
+    }));
+    this.cancelarCambiosReferencia(referencia.id);
+    this.mostrarSnackbarExito('El registro de referencia cruzada se modificó con éxito.');
+  }
+  aceptarReferenciaNueva(): void {
+    if (!this.referenciaNuevaValida()) return;
+    this.borrador.update((archivo) => ({ ...archivo, referencias: [...archivo.referencias, structuredClone(this.referenciaBorrador())] }));
+    this.cancelarReferenciaNueva();
+  }
+  cancelarCambiosReferencia(id: number): void {
+    this.borradoresReferencias.update((borradores) => {
+      const { [id]: _descartado, ...restantes } = borradores;
+      return restantes;
+    });
+  }
+  cancelarReferenciaNueva(): void {
+    this.referenciaEsNueva.set(false);
+    this.referenciaBorrador.set({ id: 0, codigo: this.siguienteCodigoReferencia(), catalogoRelacional: '', atributosComunes: [] });
+  }
+  solicitarEliminarReferencia(referencia: ReferenciaCruzada): void {
+    if (!this.referenciaFilaAbierta()) this.confirmarEliminarReferencia.set(referencia.id);
+  }
+  eliminarReferencia(): void {
+    const id = this.confirmarEliminarReferencia();
+    if (id === null) return;
+    this.borrador.update((archivo) => ({
+      ...archivo,
+      referencias: archivo.referencias.filter((valor, indice) => this.normalizarReferencia(valor, indice).id !== id),
+    }));
+    this.cancelarCambiosReferencia(id);
+    this.confirmarEliminarReferencia.set(null);
+  }
+  firmanteFilaAbierta(): boolean {
+    return this.firmanteEsNuevo() || this.firmanteEditandoId() !== null || Object.keys(this.borradoresFirmantes()).length > 0;
+  }
+  firmanteFila(firmante: Firmante): Firmante {
+    return this.borradoresFirmantes()[firmante.id] ?? firmante;
+  }
+  firmanteTieneCambios(firmante: Firmante): boolean {
+    const borrador = this.borradoresFirmantes()[firmante.id];
+    return !!borrador && !this.firmantesSonIguales(borrador, firmante);
+  }
+  actualizarFirmanteFila(firmante: Firmante, campo: 'firmante' | 'orden', valor: string): void {
+    if (firmante.documentoFirmado) return;
+    const siguiente = { ...this.firmanteFila(firmante), [campo]: valor };
+    this.borradoresFirmantes.update((borradores) => {
+      if (this.firmantesSonIguales(siguiente, firmante)) {
+        const { [firmante.id]: _descartado, ...restantes } = borradores;
+        return restantes;
+      }
+      return { ...borradores, [firmante.id]: siguiente };
+    });
+  }
+  errorOrdenFirmanteFila(firmante: Firmante): string {
+    const fila = this.firmanteFila(firmante);
+    const orden = fila.orden.trim();
+    if (!orden) return '';
+    if (!this.ordenFirmanteValido(orden)) return 'Ingrese un número entero mayor que cero.';
+    return this.firmantesVista().some((otro) => {
+      const candidato = this.firmanteFila(otro);
+      return candidato.id !== fila.id && candidato.orden.trim() && Number(candidato.orden) === Number(orden);
+    }) ? 'El orden ya fue asignado a otro firmante.' : '';
+  }
+  firmanteFilaValida(firmante: Firmante): boolean {
+    const fila = this.firmanteFila(firmante);
+    return Boolean(fila.firmante && !this.errorOrdenFirmanteFila(firmante));
+  }
+  aceptarCambiosFirmante(firmante: Firmante): void {
+    if (!this.firmanteTieneCambios(firmante) || !this.firmanteFilaValida(firmante)) return;
+    const actualizado = structuredClone(this.firmanteFila(firmante));
+    this.borrador.update((archivo) => ({
+      ...archivo,
+      firmantes: archivo.firmantes.map((valor, indice) => this.normalizarFirmante(valor, indice).id === firmante.id ? actualizado : valor),
+    }));
+    this.cancelarCambiosFirmante(firmante.id);
+    this.mostrarSnackbarExito('El registro de firmante se modificó con éxito.');
+  }
+  cancelarCambiosFirmante(id: number): void {
+    this.borradoresFirmantes.update((borradores) => {
+      const { [id]: _descartado, ...restantes } = borradores;
+      return restantes;
+    });
+  }
+  agregarFirmante(): void {
+    if (this.firmanteFilaAbierta()) return;
+    this.firmanteBorrador.set({
+      id: Date.now(),
+      codigo: this.siguienteCodigoFirmante(),
+      firmante: '',
+      orden: '',
+      documentoFirmado: false,
+    });
+    this.firmanteEsNuevo.set(true);
+  }
+  editarFirmante(firmante: Firmante): void {
+    if (firmante.documentoFirmado || this.firmanteFilaAbierta()) return;
+    this.firmanteBorrador.set(structuredClone(firmante));
+    this.firmanteEditandoId.set(firmante.id);
+  }
+  actualizarFirmante(campo: 'firmante' | 'orden', valor: string): void {
+    this.firmanteBorrador.update((firmante) => ({ ...firmante, [campo]: valor }));
+  }
+  errorOrdenFirmante(): string {
+    const orden = this.firmanteBorrador().orden.trim();
+    if (!orden) return '';
+    if (!this.ordenFirmanteValido(orden)) return 'Ingrese un número entero mayor que cero.';
+    return this.ordenFirmanteDuplicado(orden, this.firmanteEditandoId() ?? undefined)
+      ? 'El orden ya fue asignado a otro firmante.'
+      : '';
+  }
+  firmanteValido(): boolean {
+    return Boolean(this.firmanteBorrador().firmante && !this.errorOrdenFirmante());
+  }
+  aceptarFirmante(): void {
+    if (!this.firmanteValido()) return;
+    const firmante = structuredClone(this.firmanteBorrador());
+    const editandoId = this.firmanteEditandoId();
+    this.borrador.update((archivo) => ({
+      ...archivo,
+      firmantes: this.firmanteEsNuevo()
+        ? [...archivo.firmantes, firmante]
+        : archivo.firmantes.map((valor, indice) => this.normalizarFirmante(valor, indice).id === editandoId ? firmante : valor),
+    }));
+    const estabaEditando = editandoId !== null;
+    this.cancelarFirmante();
+    if (estabaEditando) this.mostrarSnackbarExito('El registro de firmante se modificó con éxito.');
+  }
+  cancelarFirmante(): void {
+    this.firmanteEsNuevo.set(false);
+    this.firmanteEditandoId.set(null);
+    this.firmanteBorrador.set({ id: 0, codigo: this.siguienteCodigoFirmante(), firmante: '', orden: '', documentoFirmado: false });
+  }
+  solicitarEliminarFirmante(firmante: Firmante): void {
+    if (!firmante.documentoFirmado && !this.firmanteFilaAbierta()) this.confirmarEliminarFirmante.set(firmante.id);
+  }
+  eliminarFirmante(): void {
+    const id = this.confirmarEliminarFirmante();
+    const firmante = this.firmantesVista().find((item) => item.id === id);
+    if (id === null || firmante?.documentoFirmado) {
+      this.confirmarEliminarFirmante.set(null);
+      return;
+    }
+    this.borrador.update((archivo) => ({
+      ...archivo,
+      firmantes: archivo.firmantes.filter((valor, indice) => this.normalizarFirmante(valor, indice).id !== id),
+    }));
+    this.cancelarCambiosFirmante(id);
+    this.confirmarEliminarFirmante.set(null);
+  }
+  configuracionFirmantesValida(): boolean {
+    const firmantes = this.firmantesVista();
+    const conOrden = firmantes.filter((firmante) => firmante.orden.trim());
+    if (conOrden.length > 0 && conOrden.length !== firmantes.length) return false;
+    return conOrden.every((firmante, indice) =>
+      this.ordenFirmanteValido(firmante.orden) &&
+      conOrden.findIndex((otro) => Number(otro.orden) === Number(firmante.orden)) === indice,
+    );
+  }
+  private siguienteCodigoFirmante(): number {
+    return Math.max(0, ...this.firmantesVista().map((firmante) => firmante.codigo)) + 1;
+  }
+  private siguienteCodigoReferencia(): number {
+    return Math.max(0, ...this.referenciasVista().map((referencia) => referencia.codigo)) + 1;
+  }
+  private ordenFirmanteValido(orden: string): boolean {
+    return /^\d+$/.test(orden) && Number(orden) > 0;
+  }
+  private ordenFirmanteDuplicado(orden: string, excluirId?: number): boolean {
+    return this.firmantesVista().some((firmante) => firmante.id !== excluirId && firmante.orden.trim() && Number(firmante.orden) === Number(orden));
+  }
+  private firmantesSonIguales(a: Firmante, b: Firmante): boolean {
+    return a.id === b.id && a.codigo === b.codigo && a.firmante === b.firmante && a.orden === b.orden && a.documentoFirmado === b.documentoFirmado;
+  }
+  private normalizarFirmante(valor: string | Firmante, indice: number): Firmante {
+    return typeof valor === 'string'
+      ? { id: -(indice + 1), codigo: indice + 1, firmante: valor, orden: '', documentoFirmado: false }
+      : valor;
+  }
+  private normalizarReferencia(valor: string | ReferenciaCruzada, indice: number): ReferenciaCruzada {
+    return typeof valor === 'string'
+      ? { id: -(indice + 1), codigo: indice + 1, catalogoRelacional: valor, atributosComunes: [] }
+      : valor;
+  }
+  private referenciasSonIguales(a: ReferenciaCruzada, b: ReferenciaCruzada): boolean {
+    return a.id === b.id && a.codigo === b.codigo && a.catalogoRelacional === b.catalogoRelacional && a.atributosComunes.length === b.atributosComunes.length && a.atributosComunes.every((valor, indice) => valor === b.atributosComunes[indice]);
+  }
+  private siguienteCodigoRegla(): number {
+    return Math.max(0, ...this.reglasVista().map((regla) => regla.codigo ?? 0)) + 1;
+  }
+  private normalizarRegla(regla: Regla, indice: number): Regla {
+    return {
+      ...regla,
+      codigo: regla.codigo ?? indice + 1,
+      archivoPadre: regla.archivoPadre ?? '',
+      nivelAgregacion: regla.nivelAgregacion ?? regla.nivel ?? '',
+      atributosComunes: regla.atributosComunes ?? [],
+      montosARevisar: regla.montosARevisar ?? [],
+    };
+  }
+  private mostrarSnackbarExito(mensaje: string): void {
+    this.mensajeSnack.set(mensaje);
+    this.snack.set(true);
   }
   solicitarGrabar() {
     if (this.validarAntesDeGrabar()) this.confirmarGuardar.set(true);
@@ -1733,13 +2399,15 @@ export class CatalogoArchivosApmComponent {
       return;
     }
     const b = structuredClone(this.borrador());
+    b.tipoAsignacion = this.tipoAsignacion();
+    b.prefijo = this.prefijo();
+    b.orden = this.esAnexo() ? this.orden() : "";
     if (this.reemplazoConfirmado()) {
       b.atributos = [];
       b.reglas = [];
       b.referencias = [];
     }
-    if (b.estado === "Inactivo" && b.hasta === "-") b.hasta = "11/11/2026";
-    if (!b.desde) b.desde = "11/11/2026";
+    this.actualizarFechasAlGrabar(b);
     this.archivos.update((xs) =>
       this.esNuevo() ? [...xs, b] : xs.map((x) => (x.id === b.id ? b : x)),
     );
@@ -1747,6 +2415,91 @@ export class CatalogoArchivosApmComponent {
     this.editando.set(false);
     this.mensajeSnack.set("Archivo de la APM grabado correctamente.");
     this.snack.set(true);
+  }
+  /** RN-GEN-022: las fechas de vigencia se sellan solo después de validar y confirmar el guardado. */
+  private actualizarFechasAlGrabar(archivo: Archivo): void {
+    if (this.esNuevo()) {
+      archivo.desde = this.fechaActualSistema();
+      archivo.hasta = "";
+      return;
+    }
+
+    const original = this.archivos().find((existente) => existente.id === archivo.id);
+    if (!original) return;
+
+    if (original.estado === "Activo" && archivo.estado === "Inactivo") {
+      archivo.desde = original.desde;
+      archivo.hasta = this.fechaHastaEstaVacia(original.hasta)
+        ? this.fechaActualSistema()
+        : original.hasta;
+      return;
+    }
+
+    if (original.estado === "Inactivo" && archivo.estado === "Activo") {
+      archivo.desde = this.fechaActualSistema();
+      archivo.hasta = "";
+      return;
+    }
+
+    // Sin transición de estado, las fechas históricas no se recalculan.
+    archivo.desde = original.desde;
+    archivo.hasta = original.hasta;
+  }
+  private fechaHastaEstaVacia(fecha: string): boolean {
+    return !fecha || fecha === "-";
+  }
+  private fechaActualSistema(fecha = new Date()): string {
+    const dia = String(fecha.getDate()).padStart(2, "0");
+    const mes = String(fecha.getMonth() + 1).padStart(2, "0");
+    return `${dia}/${mes}/${fecha.getFullYear()}`;
+  }
+  private codigoDuplicado(archivo: Archivo): boolean {
+    return this.archivos().some(
+      (existente) =>
+        existente.id !== archivo.id &&
+        existente.anio === archivo.anio &&
+        existente.codigo === archivo.codigo,
+    );
+  }
+  private ordenDuplicado(archivo = this.borrador()): boolean {
+    const orden = this.orden().trim();
+    return Boolean(
+      archivo.tipo === "2 - Anexo" &&
+        archivo.estado === "Activo" &&
+        orden &&
+        this.archivos().some(
+          (existente) =>
+            existente.id !== archivo.id &&
+            existente.anio === archivo.anio &&
+            existente.tipo === "2 - Anexo" &&
+            existente.estado === "Activo" &&
+            existente.orden?.trim() === orden,
+        ),
+    );
+  }
+  private prefijoDuplicado(archivo: Archivo): boolean {
+    const prefijo = this.prefijo().trim().toLocaleUpperCase();
+    return Boolean(
+      prefijo &&
+        this.archivos().some(
+          (existente) =>
+            existente.id !== archivo.id &&
+            existente.anio === archivo.anio &&
+            existente.estado === "Activo" &&
+            existente.prefijo?.trim().toLocaleUpperCase() === prefijo,
+        ),
+    );
+  }
+  private archivoEsPadreDeReglaActiva(archivo: Archivo): boolean {
+    const idArchivoPadre = String(archivo.id);
+    return this.archivos().some(
+      (archivoRelacionado) =>
+        archivoRelacionado.id !== archivo.id &&
+        archivoRelacionado.estado === "Activo" &&
+        archivoRelacionado.reglas.some(
+          (regla) => regla.archivoPadre === idArchivoPadre,
+        ),
+    );
   }
   limpiarFiltros() {
     this.anioFiltro.set("");
