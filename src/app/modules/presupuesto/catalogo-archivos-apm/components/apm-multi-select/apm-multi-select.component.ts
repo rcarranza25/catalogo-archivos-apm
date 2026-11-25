@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, EventEmitter, HostListener, Input, Output, inject, signal } from '@angular/core';
 
 import { FocoDirective } from '../../../../../shared/ui/foco/foco.directive';
 import { IconComponent } from '../../../../../shared/ui/icon/icon.component';
@@ -27,6 +27,14 @@ import { TagComponent } from '../../../../../shared/ui/tag/tag.component';
     [role='combobox'][aria-expanded='false']:not([data-error='true']):focus:not(:focus-visible) {
       border-width: 1px;
       border-color: var(--sys-color-border-states-enabled);
+    }
+
+    /* En la grilla de referencias el panel flotante administra un único
+       contenedor desplazable. La lista compartida conserva su comportamiento
+       habitual en todos los demás usos. */
+    :host ::ng-deep .apm-single-scroll-panel siaf-select-options > [role='listbox'] {
+      max-height: none;
+      overflow-y: visible;
     }
   `,
   template: `
@@ -85,19 +93,34 @@ import { TagComponent } from '../../../../../shared/ui/tag/tag.component';
             (click)="close()"
           ></button>
           <div
-            class="relative z-40 mt-siaf-xs sm:absolute sm:left-0 sm:right-0 sm:top-[calc(100%+4px)] sm:mt-0"
+            [class]="panelClass"
+            [style.left.px]="panelFixed ? panelPosition().left : null"
+            [style.top.px]="panelFixed ? panelPosition().top : null"
+            [style.bottom.px]="panelFixed ? panelPosition().bottom : null"
+            [style.width.px]="panelFixed ? panelPosition().width : null"
+            [style.max-height.px]="panelFixed ? panelPosition().maxHeight : null"
             siafFoco
             [siafFocoAtrapar]="false"
             (siafFocoEscape)="close()"
             (siafFocoSalida)="close()"
           >
-            <siaf-select-options
-              [options]="menuOptions"
-              [selectedValues]="selectedMenuValues"
-              [multiple]="true"
-              [checkboxes]="true"
-              (selected)="toggleOption($event)"
-            />
+            @if (showSelectionHeader) {
+              <div class="flex min-h-12 items-center px-siaf-md py-siaf-sm text-sm font-medium text-[var(--sys-color-text-neutral-medium)]" data-selection-header>
+                Seleccionar
+              </div>
+            }
+            <div
+              [class.overflow-y-auto]="singleScrollPanel"
+              [style.max-height.px]="singleScrollPanel ? alturaListaConScrollUnico : null"
+            >
+              <siaf-select-options
+                [options]="showSelectionHeader ? selectableOptions : menuOptions"
+                [selectedValues]="showSelectionHeader ? selectedValues : selectedMenuValues"
+                [multiple]="true"
+                [checkboxes]="true"
+                (selected)="toggleOption($event)"
+              />
+            </div>
           </div>
         }
       </div>
@@ -116,10 +139,19 @@ export class ApmMultiSelectComponent {
   @Input() required = false;
   @Input() disabled = false;
   @Input() error = '';
+  /** Abre el menú fuera de contenedores con overflow (uso local en grillas editables). */
+  @Input() panelFixed = false;
+  @Input() panelMinWidth = 0;
+  /** Evita doble scroll cuando este panel flotante contiene la lista del UI Kit. */
+  @Input() singleScrollPanel = false;
+  /** Encabezado informativo sin checkbox; se usa en Reglas sumarizadas. */
+  @Input() showSelectionHeader = false;
 
   @Output() readonly valueChange = new EventEmitter<string[]>();
 
   readonly open = signal(false);
+  readonly panelPosition = signal({ left: 0, top: 0 as number | null, bottom: null as number | null, width: 0, maxHeight: 320 });
+  private readonly host = inject(ElementRef<HTMLElement>);
 
   /** Las selecciones siempre se muestran y emiten en el orden definido por las opciones. */
   get selectedValues(): string[] {
@@ -146,6 +178,10 @@ export class ApmMultiSelectComponent {
     return [{ value: '', label: 'Seleccionar' }, ...this.options.filter((option) => option.value !== '')];
   }
 
+  get selectableOptions(): SelectOption[] {
+    return this.options.filter((option) => option.value !== '');
+  }
+
   /** La opción vacía refleja visualmente el estado sin selecciones. */
   get selectedMenuValues(): string[] {
     return this.selectedValues.length ? this.selectedValues : [''];
@@ -161,8 +197,22 @@ export class ApmMultiSelectComponent {
     return 'border border-[var(--sys-color-border-states-enabled)] bg-surface hover:border-2 hover:border-[var(--sys-color-border-states-hover)] focus:border-2 focus:border-[var(--sys-color-border-states-focus)] focus-within:border-2 focus-within:border-[var(--sys-color-border-states-focus)]';
   }
 
+  get panelClass(): string {
+    return this.panelFixed
+      ? `fixed z-40 ${this.singleScrollPanel ? 'overflow-hidden apm-single-scroll-panel' : 'overflow-y-auto'} rounded-siaf-md shadow-lg`
+      : 'relative z-40 mt-siaf-xs sm:absolute sm:left-0 sm:right-0 sm:top-[calc(100%+4px)] sm:mt-0';
+  }
+
+  get alturaListaConScrollUnico(): number {
+    const encabezado = this.showSelectionHeader ? 48 : 0;
+    return Math.max(48, this.panelPosition().maxHeight - encabezado);
+  }
+
   toggle(): void {
-    if (!this.disabled) this.open.update((isOpen) => !isOpen);
+    if (this.disabled) return;
+    const abrir = !this.open();
+    this.open.set(abrir);
+    if (abrir && this.panelFixed) queueMicrotask(() => this.actualizarPosicionPanel());
   }
 
   toggleFromKeyboard(event: Event): void {
@@ -172,6 +222,32 @@ export class ApmMultiSelectComponent {
 
   close(): void {
     this.open.set(false);
+  }
+
+  @HostListener('window:resize')
+  @HostListener('document:scroll')
+  actualizarPosicionPanel(): void {
+    if (!this.open() || !this.panelFixed) return;
+    const trigger = this.host.nativeElement.querySelector('[role="combobox"]') as HTMLElement | null;
+    if (!trigger) return;
+
+    const rect = trigger.getBoundingClientRect();
+    const margen = 8;
+    const maximo = 320;
+    const debajo = window.innerHeight - rect.bottom - margen;
+    const encima = rect.top - margen;
+    const abrirArriba = debajo < 160 && encima > debajo;
+    const disponible = abrirArriba ? encima : debajo;
+    const ancho = Math.min(Math.max(rect.width, this.panelMinWidth), window.innerWidth - margen * 2);
+    const izquierda = Math.min(Math.max(margen, rect.left), window.innerWidth - ancho - margen);
+
+    this.panelPosition.set({
+      left: izquierda,
+      top: abrirArriba ? null : rect.bottom + 4,
+      bottom: abrirArriba ? window.innerHeight - rect.top + 4 : null,
+      width: ancho,
+      maxHeight: Math.max(96, Math.min(maximo, disponible)),
+    });
   }
 
   toggleOption(value: string): void {

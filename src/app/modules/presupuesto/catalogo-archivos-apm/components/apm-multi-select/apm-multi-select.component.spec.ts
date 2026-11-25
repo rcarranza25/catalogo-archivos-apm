@@ -40,6 +40,16 @@ describe('ApmMultiSelectComponent', () => {
     expect(emitted).toEqual([]);
   });
 
+  it('muestra Seleccionar como encabezado informativo sin checkbox cuando se configura', () => {
+    fixture.componentRef.setInput('showSelectionHeader', true);
+    component.open.set(true);
+    fixture.detectChanges();
+
+    expect(component.selectableOptions.map((option) => option.label)).toEqual(['Anio_1', 'Anio_2', 'Anio_3']);
+    expect(fixture.nativeElement.querySelector('[data-selection-header]')?.textContent?.trim()).toBe('Seleccionar');
+    expect(fixture.nativeElement.querySelectorAll('[data-selection-header] input[type="checkbox"]').length).toBe(0);
+  });
+
   it('retira una selección mediante su tag', () => {
     let emitted: string[] | undefined;
     component.valueChange.subscribe((value) => emitted = value);
@@ -61,5 +71,17 @@ describe('ApmMultiSelectComponent', () => {
     fixture.detectChanges();
 
     expect(fixture.nativeElement.querySelector('span.absolute')?.textContent?.replace('*', '').trim()).toBe('Montos a revisar');
+  });
+
+  it('puede abrir el panel como capa fija para una grilla con desbordamiento', () => {
+    fixture.componentRef.setInput('panelFixed', true);
+    fixture.componentRef.setInput('panelMinWidth', 360);
+
+    component.toggle();
+    fixture.detectChanges();
+
+    const panel = fixture.nativeElement.querySelector('siaf-select-options')?.parentElement as HTMLElement;
+    expect(panel.classList.contains('fixed')).toBeTrue();
+    expect(panel.classList.contains('overflow-y-auto')).toBeTrue();
   });
 });

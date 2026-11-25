@@ -61,6 +61,7 @@ export interface SelectOption {
   template: `
     <div
       class="max-h-72 w-full overflow-y-auto rounded-siaf-md bg-[var(--sys-color-bg-surfaces-floating,var(--sys-color-bg-surfaces-surface))] py-siaf-xs shadow-siaf-elevation-1"
+      [style.max-height.px]="maxHeight || null"
       role="listbox"
       [attr.aria-multiselectable]="multiple"
     >
@@ -162,6 +163,8 @@ export class SelectOptionsComponent {
   @Input() wrapOptions = false;
   /** Con casillas, agrega arriba la fila que marca o desmarca todas («Seleccionar todo»). */
   @Input() selectAllLabel = '';
+  /** Límite de alto para un panel flotante que debe mantenerse dentro del viewport. */
+  @Input() maxHeight = 0;
 
   @Output() selected = new EventEmitter<string>();
   /** «Seleccionar todo»: `true` para marcar todas las habilitadas, `false` para desmarcarlas. */

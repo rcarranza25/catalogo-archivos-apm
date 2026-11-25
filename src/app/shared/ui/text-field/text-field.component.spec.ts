@@ -220,3 +220,60 @@ describe('TextFieldComponent — otros tipos', () => {
     expect(emitidos.at(-1)).toEqual([]);
   });
 });
+
+describe('TextFieldComponent — panel fijo', () => {
+  let fixture: ComponentFixture<TextFieldComponent>;
+  let component: TextFieldComponent;
+  let descriptorAlto: PropertyDescriptor | undefined;
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({ imports: [TextFieldComponent] }).compileComponents();
+    fixture = TestBed.createComponent(TextFieldComponent);
+    component = fixture.componentInstance;
+    descriptorAlto = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 700 });
+    fixture.componentRef.setInput('type', 'select');
+    fixture.componentRef.setInput('label', 'Firmante');
+    fixture.componentRef.setInput('selectPanelFixed', true);
+    fixture.componentRef.setInput('selectPanelMinWidth', 320);
+    fixture.componentRef.setInput('options', [{ label: 'Usuario', value: 'usuario' }]);
+    fixture.detectChanges();
+  });
+
+  afterEach(() => {
+    if (descriptorAlto) Object.defineProperty(window, 'innerHeight', descriptorAlto);
+  });
+
+  function abrirConRect(rect: Partial<DOMRect>): void {
+    const trigger = fixture.nativeElement.querySelector('[role="combobox"]') as HTMLButtonElement;
+    spyOn(trigger, 'getBoundingClientRect').and.returnValue({
+      left: 24, right: 304, top: 600, bottom: 640, width: 280, height: 40, x: 24, y: 600,
+      toJSON: () => ({}), ...rect,
+    } as DOMRect);
+    component.toggleSelect({ currentTarget: trigger } as unknown as Event);
+    fixture.detectChanges();
+  }
+
+  it('abre hacia arriba cuando el espacio inferior es insuficiente', () => {
+    abrirConRect({ top: 600, bottom: 640 });
+
+    expect(component.selectPanelTop).toBeNull();
+    expect(component.selectPanelBottom).toBe(104);
+    expect(component.selectPanelWidth).toBe(320);
+    expect(component.selectPanelMaxHeight).toBe(288);
+  });
+
+  it('recalcula en scroll y cierra el panel si el selector abandona el viewport', () => {
+    abrirConRect({ top: 300, bottom: 340 });
+    expect(component.selectOpen).toBeTrue();
+
+    const trigger = fixture.nativeElement.querySelector('[role="combobox"]') as HTMLButtonElement;
+    (trigger.getBoundingClientRect as jasmine.Spy).and.returnValue({
+      left: 24, right: 304, top: -50, bottom: -10, width: 280, height: 40, x: 24, y: -50,
+      toJSON: () => ({}),
+    } as DOMRect);
+    document.dispatchEvent(new Event('scroll'));
+
+    expect(component.selectOpen).toBeFalse();
+  });
+});

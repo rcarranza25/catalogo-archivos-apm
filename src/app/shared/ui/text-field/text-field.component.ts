@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, ChangeDetectorRef, Component, EventEmitter, forwardRef, inject, Input, OnChanges, Output, SimpleChanges } from '@angular/core';
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, ElementRef, EventEmitter, forwardRef, HostListener, inject, Input, OnChanges, Output, SimpleChanges } from '@angular/core';
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
 
 import { IconComponent } from '../icon/icon.component';
@@ -146,6 +146,7 @@ export type TextFieldState = 'enabled' | 'error' | 'success';
               [class]="selectPanelFixed ? 'fixed z-50' : 'relative z-40 mt-siaf-xs sm:absolute sm:left-0 sm:right-0 sm:top-[calc(100%+4px)] sm:mt-0'"
               [style.left.px]="selectPanelFixed ? selectPanelLeft : null"
               [style.top.px]="selectPanelFixed ? selectPanelTop : null"
+              [style.bottom.px]="selectPanelFixed ? selectPanelBottom : null"
               [style.width.px]="selectPanelFixed ? selectPanelWidth : null"
               siafFoco [siafFocoAtrapar]="false" (siafFocoEscape)="closeSelect()" (siafFocoSalida)="closeSelect()"
             >
@@ -153,6 +154,7 @@ export type TextFieldState = 'enabled' | 'error' | 'success';
                 [options]="selectOptions"
                 [selectedValue]="selectValue"
                 [selectedValues]="selectValues"
+                [maxHeight]="selectPanelFixed ? selectPanelMaxHeight : 0"
                 [wrapOptions]="selectPanelWrapOptions"
                 (selected)="onOptionSelected($event)"
               />
@@ -212,6 +214,7 @@ export type TextFieldState = 'enabled' | 'error' | 'success';
               [class]="selectPanelFixed ? 'fixed z-50' : 'relative z-40 mt-siaf-xs sm:absolute sm:left-0 sm:right-0 sm:top-[calc(100%+4px)] sm:mt-0'"
               [style.left.px]="selectPanelFixed ? selectPanelLeft : null"
               [style.top.px]="selectPanelFixed ? selectPanelTop : null"
+              [style.bottom.px]="selectPanelFixed ? selectPanelBottom : null"
               [style.width.px]="selectPanelFixed ? selectPanelWidth : null"
               siafFoco [siafFocoAtrapar]="false" (siafFocoEscape)="closeSelect()" (siafFocoSalida)="closeSelect()"
             >
@@ -221,6 +224,7 @@ export type TextFieldState = 'enabled' | 'error' | 'success';
                 [multiple]="true"
                 [checkboxes]="!!selectAllLabel"
                 [selectAllLabel]="selectAllLabel"
+                [maxHeight]="selectPanelFixed ? selectPanelMaxHeight : 0"
                 [wrapOptions]="selectPanelWrapOptions"
                 (selected)="onOptionSelected($event)"
                 (allSelected)="onAllSelected($event)"
@@ -288,6 +292,7 @@ export type TextFieldState = 'enabled' | 'error' | 'success';
 })
 export class TextFieldComponent implements OnChanges, ControlValueAccessor {
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly host = inject(ElementRef<HTMLElement>);
 
   @Input() label = '';
   @Input() placeholder = '';
@@ -329,8 +334,11 @@ export class TextFieldComponent implements OnChanges, ControlValueAccessor {
   focused = false;
   selectOpen = false;
   selectPanelLeft = 0;
-  selectPanelTop = 0;
+  selectPanelTop: number | null = 0;
+  selectPanelBottom: number | null = null;
   selectPanelWidth = 0;
+  selectPanelMaxHeight = 0;
+  private selectTrigger: HTMLElement | null = null;
   internalValue: string | number | string[] = '';
 
   private onChange: (value: string | number | string[]) => void = () => undefined;
@@ -604,16 +612,44 @@ export class TextFieldComponent implements OnChanges, ControlValueAccessor {
     this.selectOpen = !this.selectOpen;
     this.focused = this.selectOpen;
     if (this.selectOpen && this.selectPanelFixed) {
-      const trigger = event?.currentTarget as HTMLElement | null;
-      if (trigger && typeof window !== 'undefined') {
-        const rect = trigger.getBoundingClientRect();
-        const viewportWidth = window.innerWidth;
-        const width = Math.min(Math.max(rect.width, this.selectPanelMinWidth || rect.width), Math.max(0, viewportWidth - 16));
-        this.selectPanelLeft = Math.max(8, Math.min(rect.left, viewportWidth - width - 8));
-        this.selectPanelTop = rect.bottom + 4;
-        this.selectPanelWidth = width;
-      }
+      this.selectTrigger = event?.currentTarget as HTMLElement | null;
+      this.actualizarPosicionSelect();
+    } else if (!this.selectOpen) {
+      this.selectTrigger = null;
     }
+    this.cdr.markForCheck();
+  }
+
+  /** Recalcula únicamente los selectores que optan por el panel fijo. */
+  @HostListener('window:resize')
+  @HostListener('window:scroll')
+  @HostListener('document:scroll')
+  actualizarPosicionSelect(): void {
+    if (!this.selectOpen || !this.selectPanelFixed || typeof window === 'undefined') return;
+    const trigger = this.selectTrigger ?? this.host.nativeElement.querySelector('[role="combobox"]') as HTMLElement | null;
+    if (!trigger) return;
+
+    const rect = trigger.getBoundingClientRect();
+    if (rect.bottom <= 0 || rect.top >= window.innerHeight || rect.right <= 0 || rect.left >= window.innerWidth) {
+      this.closeSelect();
+      return;
+    }
+
+    const margen = 8;
+    const altoMaximo = 288;
+    const espacioAbajo = window.innerHeight - rect.bottom - margen;
+    const espacioArriba = rect.top - margen;
+    const abrirArriba = espacioAbajo < Math.min(altoMaximo, 192) && espacioArriba > espacioAbajo;
+    const ancho = Math.min(
+      Math.max(rect.width, this.selectPanelMinWidth || rect.width),
+      Math.max(0, window.innerWidth - margen * 2),
+    );
+
+    this.selectPanelLeft = Math.max(margen, Math.min(rect.left, window.innerWidth - ancho - margen));
+    this.selectPanelWidth = ancho;
+    this.selectPanelTop = abrirArriba ? null : rect.bottom + 4;
+    this.selectPanelBottom = abrirArriba ? window.innerHeight - rect.top + 4 : null;
+    this.selectPanelMaxHeight = Math.max(96, Math.min(altoMaximo, abrirArriba ? espacioArriba : espacioAbajo));
     this.cdr.markForCheck();
   }
 
@@ -627,6 +663,7 @@ export class TextFieldComponent implements OnChanges, ControlValueAccessor {
   closeSelect(): void {
     this.selectOpen = false;
     this.focused = false;
+    this.selectTrigger = null;
     this.onTouched();
     this.cdr.markForCheck();
   }
